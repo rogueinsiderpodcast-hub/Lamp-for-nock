@@ -21,11 +21,12 @@ No operating system, no libc, no bootloader, no disk, no network. The only piece
 of hardware it touches is the 16550 serial port at 0x3f8, polled, one byte at a
 time.
 
-The whole machine is roughly 1,100 lines: 130 of assembly to reach long mode,
-the rest C. It implements Nock 4K — all twelve opcodes — over a noun
-representation where atoms are 63-bit numbers and cells point into an arena that
-only ever grows, so the state of the machine is a log and its history is
-everything it has already written.
+The whole machine is 1,399 lines, counting code but not comments or blank
+lines: 115 of assembly to reach long mode, 898 of C, and 386 of tests. It
+implements Nock 4K — all twelve opcodes — over a noun representation where
+atoms are 63-bit numbers and cells point into an arena that only ever grows, so
+the state of the machine is a log and its history is everything it has already
+written.
 
 ## Running it
 
