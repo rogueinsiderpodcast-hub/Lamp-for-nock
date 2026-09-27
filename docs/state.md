@@ -14,17 +14,20 @@ of them still leaves something real.
 |---|---|---|---|
 | **1. Lamp** | It boots, and it counts. | the twenty shortcuts work | **done — green** |
 | **2. Guest Book** | You type at it, it answers, and it remembers everything you did this session. | 1 + 2, writing rather than mutating | **done — green** |
-| **3. Teacher** | You write instructions in a real language, and they run. | 3, code is data | **started** |
+| **3. Teacher** | You write instructions in a real language, and they run. | 3, code is data | **green — a Hoon-shaped language, no loops yet** |
 | **4. Notebook** | The guest book survives the power being turned off. | durability | not started |
 | **5. New Rules** | The machine rewrites its own behaviour from text you send it, and cannot be broken by it. | 5, it cannot be lied to | not started |
 | ~~Wire~~ | ~~Networking~~ | | deferred indefinitely |
 
-**Step 3 is the bridge.** The Hoon compiler stays on the host: you type Hoon,
-a helper process on the workstation compiles it, and the resulting noun is sent
-into the guest as data. You get the experience of Urbit without porting its
-compiler to bare metal. Nothing of this exists yet — there is no host-side
-program, no `tools/`, and no serial protocol. The only host-to-guest handover
-that exists at all is QEMU's boot-parameter pointer.
+**Step 3 is the bridge.** The compiler stays on the host: you type into
+`tools/hoon.c`, a program on the workstation compiles it, and the resulting
+noun is sent into the guest as data. You get the experience of Urbit without
+porting its compiler to bare metal. The handover is the serial reader and
+nothing else — no protocol, no framing, no new guest code, and no boot-parameter
+trick. What exists now is a Hoon-*shaped* language rather than Hoon itself: ten
+forms, addresses checked against the subject the expression will run on, and
+refusals by name for everything else. See `decisions.md` item 22 and "Where Step
+3 stands" below.
 
 Note for later: `vere`/Arvo is a userspace process, not a kernel. The realistic
 endgame is Lamp as a scaffold *around* a real Urbit on the host, not Urbit
@@ -143,7 +146,7 @@ could be read:
 
 ## Where Step 2 stands
 
-**Done.** The self-test is 228 checks, 0 failing, `LAMP: LIT`, checklist 11 of 11
+**Done.** The self-test is 249 checks, 0 failing, `LAMP: LIT`, checklist 11 of 11
 -- the eleventh being the new one, that a formula typed at the machine runs and
 what it leaves behind matters.  It was checked by breaking the count increment
 and watching the lamp go dark, because a checklist item that cannot fail is a
@@ -177,16 +180,21 @@ A blank line shows the session, which is the only place C walks it: Nock has no
 loop, so printing a list of unknown length is C's job and nothing else is. The
 session is a noun and the book is one formula (`kernel/book.c`), with the whole
 derivation in comments next to it, because the derivation is the part worth
-reading twice. Both halves are tested: 47 checks for the reader, and the book's
+reading twice. Both halves are tested: 49 checks for the reader, and the book's
 own group pins the address arithmetic, the shape of a session, two lines
 chained, a line reading its own history, a line that breaks, and a line that
 runs out of steps.
 
 The addresses are the cost of doing it properly, and they are in `decisions.md`
-item 19. Briefly: a session's parts are at `/2`, `/6`, `/14`; the line is run on
-`[line session]`, so the session is at `/3` and its parts are at `/6`, `/14` and
-`/30`. Every one of those numbers is a place a plausible guess is silently
-wrong.
+item 19. Briefly: a session's parts are at `/2` (the log), `/6` (the last answer),
+`/8` (the newest line), `/14` (the count) and `/18` (that line's answer); the
+line is run on `[line session]`, so the session is at `/3` and its three
+book-named parts are at `/6`, `/14` and `/30`. Every one of those numbers is a
+place a plausible guess is silently wrong, and there were five of them rather
+than three: `/8` and `/18` were missing from the written list until the
+compiler asked for them, and a line that pushes on the front found `/8` missing
+from the pushed shape too — see item 22, where the shift that "should" be
+`2a + 2` and is not nearly cost an afternoon.
 
 ### The four questions, answered
 
@@ -219,6 +227,108 @@ wrong.
    what a session of compiled formulas will run into first: at 4096 characters
    it spends 4100 cells of 8,317,184, and the depth limit of 256 open brackets
    is the one reached first in practice.
+
+## Where Step 3 stands
+
+**Green, for a language that is ten forms long.** `tools/hoon.c` is 605 lines of
+host C, it links the machine's own `noun.c`, `nock.c`, `primitives.c`,
+`book.c` and `guestbook.c` rather than a copy of them, and it has two suites:
+`make hoontest` is 40 checks on the host, where the formulas are run by the
+machine's own interpreter and the answers come from the machine's own book, and
+`make teach` is the bridge end to end — the host compiles four expressions, the
+text goes down the serial line as characters, the guest's reader reads it, the
+guest's interpreter runs it, and the answers come back.
+
+```
+> [8 [[0 [14 0]] [[6 [[0 [2 0]] [[1 [1 0]] [[1 [2 0]] 0]]]] 0]]]
+  1  (1 so far)
+> [8 [[0 [14 0]] [[6 [[0 [2 0]] [[1 [1 0]] [[1 [2 0]] 0]]]] 0]]]
+  2  (2 so far)
+> [2 [[10 [[6 [1 [3 0]]] ...] [[10 [[6 [1 [2 0]]] ...] 0]]]
+  1  (3 so far)
+> [8 [[0 [14 0]] [[4 [[0 [2 0]] 0]] 0]]]
+  4  (4 so far)
+```
+
+Those four answers are one claim, not four. The second answering 2 means the
+count read at `/14` was 1, so the first line was typed, read, run and
+remembered; the fourth answering 4 means the count was 3, so all three before it
+were. The text going down that line is a single `=` + three nested opcode-10
+edits, and it is a `4096`-character budget spent in 70.
+
+The language, and the three things that shaped it, are in `decisions.md` item 22.
+Briefly: a cell is two edits into a template of zeros because Nock cannot cons,
+so `|(a b)` is `[a b 0]` and not `[a b]` — the reader folds a bracket
+right-nested and therefore has no spelling at all for a cell whose tail is an
+atom; an address is checked against the subject the expression will be run on,
+so `/8` inside a `=+` is a refusal rather than a plausible answer; and `+(a b)`
+folds on the host for two literals and refuses everything else, because the
+twenty native integer operations are a tested bank and not proven jets.
+
+### What the compiler found about the machine
+
+The interesting part of this step was not writing the compiler, it was the four
+things the compiler got wrong first. Three were caught by the tests. The fourth
+was caught by reading a refusal, and it is the one worth remembering.
+
+**The shift under `=+` is not `2a + 2`.** An address is a leading 1 and then a
+path, so a push on the front puts one more step in front of every path inside
+the old subject: `/2` → `/6`, `/6` → `/14`, `/14` → `/30`, `/30` → `/62`. The
+compiler's first version computed `2a + 2`, which agrees on all five of those
+and is wrong everywhere else — `/8` → `/24` and not `/18`, `/18` → `/50` and not
+`/38`, the whole old subject → `/3` and not `/2`. It agreed because the three
+addresses `book.c` names are the only ones anyone had written down. The test
+`=+(/14 /24)` is in the suite because that is the case that caught it, and
+`axis_shifted` writes the shift out rather than computing it, with a comment
+saying why the arithmetic-looking version is the dangerous one.
+
+**The axis check was in the wrong place.** It lived in the parser, which reads
+the *body* of a `=+` before anything has been pushed on — so `/8` inside a
+push was being checked against the subject outside it, and was accepted, because
+`/8` is a real address of the session. It moved to `emit`, where the shape is
+the one the formula will be run on. A compiler that knows what the subject is
+has to know it at the point of emission, not at the point of reading.
+
+**Opcode 2 is not Hoon's `*`.** This machine's opcode 2 evaluates *both*
+arguments in the outer subject and then runs the second one's value on the
+first one's value, so `b` is an expression whose *result* is a formula. In a
+language where nearly everything is a value, that means a call is usually
+written `*(|(1 3) |(0 2))`: make the subject `[1 3 0]`, make the formula
+`[0 2 0]`, answer 1. The first version of that test, `*(|(1 3) /2)`, was not a
+bug in the compiler at all — it was a wrong guess about the opcode, and the
+interpreter's own complaint (`a formula must be a cell, but this is an atom`) is
+what showed it. `nock.c` has a comment on the difference from opcode 8, which
+does not evaluate its second argument; that comment is the reason the two are
+not confused again here.
+
+**A shape with a hole in it, and a test that passed anyway.** A push puts two
+entries at the front of the shape — the value at `/2` and the old subject at
+`/3` — so every existing entry has to move up by two. The first version moved
+them up by *one*, which quietly lost the `/6`, the log, from the middle of the
+table, and nothing failed: a missing address is a hole, not a crash, so the
+addresses that were asked for still compiled and the ones that were not were
+still refused. The only sign was a refusal that listed one address too few, and
+nobody reads a refusal message to check off an address list.
+
+The test suite did not catch it because the suite checked that refusals
+happened, not what they said. Both refusal checks now compare the *whole* list
+the message prints — `/2 /3 /6 /14 /24 /30 /50` for the pushed subject, `/2 /6
+/8 /14 /18` for the session — which is the only place the compiler's idea of
+the subject is ever written down, and therefore the only place worth asserting.
+The second version of the fix, copying forwards instead of backwards, was wrong
+in the other direction and duplicated three entries; both directions are now
+described in `axis_shifted` and `shape_push` so the next reader does not
+rediscover them.
+
+### What is not here
+
+No loops, so no Hoon recursion: `=+(a ~(c =+(a b) 0))` is the shape every
+recursion takes and it cannot be written. No run-time addition, on purpose. No
+types beyond "an address the session has" and "a value the machine can put in a
+noun", no user-defined cores, and nothing that could grow past a line of 4096
+characters. The next step is not more of this language; it is the native
+operations proven against their Nock definitions, which is what unblocks
+`+(a b)` and is the first job of the step after this one.
 
 ## The questions waiting on the bridge
 

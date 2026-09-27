@@ -614,3 +614,75 @@ the binding constraint, not the machine's. The depth limit of 256 is the one
 that will bite first in practice, since every `=+` costs several levels. Until
 the jammer exists the ceiling is 4096 and the failure is a refusal by name
 rather than a scribble, which is what the limits have always been for.
+
+---
+
+## 22. The language is Hoon-shaped, and the shift is not arithmetic
+
+**Decided:** the host compiler reads a small language that borrows Hoon's
+spelling and none of its type system. Ten forms, and each one is a named opcode
+or a refusal:
+
+| Written | Is |
+|---|---|
+| `42` | the atom 42 (opcode 1) |
+| `/14` | the subject at that tree address (opcode 0) |
+| `?(a)` | 0 if `a` is a cell, 1 if it is an atom (opcode 3) |
+| `=(a b)` | 0 if the nouns are the same, 1 if not (opcode 5) |
+| `~(c t e)` | `t` if `c` is 0, `e` if `c` is 1 (opcode 6) |
+| `*(a b)` | call: `a`'s value is the subject, `b`'s value is the formula (opcode 2) |
+| `\|(a b)` | the three-word list `[a b 0]` (two opcode-10 edits) |
+| `+(a)` | `a` plus one (opcode 8, then opcode 4) |
+| `+(a b)` | `a` plus `b`, and only when both are literals |
+| `=+(a body)` | push `a` on the front and run `body` there (opcode 8) |
+
+Addresses are checked against the subject the expression will be run on, and an
+address that is not in that shape is refused by name. `+(a b)` is refused for
+anything but two literals, and `=-` is refused outright.
+
+**Why:** three things in this project are worth a language of their own rather
+than C, and each one earned it. *Cells* are the first: Nock cannot cons, so a
+cell is two edits into a canned template of zeros, and `book.c` already does
+this at addresses 2 and 6. The compiler does the same at the same addresses, and
+the tests check the two files still agree, which is the only way either of them
+can be wrong quietly. *Addresses* are the second: a wrong address on this
+machine usually names a real noun instead of crashing, which is the worst kind
+of bug to have, so the shape is part of the type system and `/8` inside a `=+`
+is a refusal rather than a plausible answer. *Arithmetic* is the third, and it
+is the one that decided the shape of everything: `+(2 3)` folds on the host
+because folding is provable by inspection, and `+(/14 1)` does not compile at
+all, because the twenty native integer operations are a tested bank and not
+proven jets (item 9). A compiler that quietly emitted a native call there would
+be a compiler whose answers nothing has ever checked. `=(a b)` has the same gap
+behind it and is *not* refused, because equality is opcode 5 and needs no core
+-- and that difference is the whole line this language is drawn along.
+
+The shift under `=+` is the part most likely to be got wrong, and it is worth
+writing down as its own fact because the wrong version looks like arithmetic. A
+tree address is a leading 1 and then a path, so a push on the front of the
+subject puts one more step in front of every path inside it: `/2` becomes `/6`,
+`/6` becomes `/14`, `/14` becomes `/30` and `/30` becomes `/62`. Those five are
+also exactly what `2a + 2` gives, and `2a + 2` is *wrong* for every other
+address -- `/8` goes to `/24` and not `/18`, `/18` goes to `/50` and not `/38`,
+and the whole old subject goes to `/3` and not `/2`. The three that work are the
+three `book.c` names, so the rule agrees with the constants everywhere anyone
+had already looked. The compiler writes the shift out instead of computing it,
+and the `/24` case in its tests exists because that is the test that caught it.
+
+**Also:** `*(a b)` is not Hoon's `*`, and the difference is not cosmetic. This
+machine's opcode 2 evaluates *both* arguments in the outer subject and then
+runs the second one's **value** on the first one's value, so `b` is not a
+formula written down but an expression whose result is one. In a language where
+almost everything is a value, a call is therefore usually written with `|`,
+which is the one form here that can make a formula out of two atoms: `*(|(1 3)
+|(0 2))` makes the subject `[1 3 0]`, makes the formula `[0 2 0]`, and answers
+1. That is uglier than Hoon's spelling, and it is what the opcode means.
+
+**Cost:** the language is a bridge, not a port, and three things are visibly
+missing. There is no loop, so there is no way to say `=+(a ~(c =+(a b) 0))`
+yet -- which is also the shape every Hoon recursion takes, and much of the reason the
+compiler is 605 lines rather than 40. `+(a b)` for run-time values is missing on
+purpose, so arithmetic on a line is a Step 4 question that needs the native
+operations proven first. And `*` costs an extra `|` per call for the reason
+above, which is the first place where this language is worse to write than the
+one it borrows from.

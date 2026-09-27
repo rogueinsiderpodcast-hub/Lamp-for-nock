@@ -1,7 +1,10 @@
 # Lamp
 
-A freestanding Nock machine. Step 1: it boots, it evaluates Nock, it tests
-itself, it prints the result, it halts.
+A freestanding Nock machine. It boots, it evaluates Nock, it tests itself, it
+prints the result, it halts; it opens a guest book that remembers everything you
+did this session; and it runs instructions written in a small Hoon-shaped
+language that a program on the host compiles into the bracket text the guest
+already knows how to read.
 
 Nock is a 300-word specification of a combinator calculator. It is the layer
 Urbit's Hoon compiles down to, and it is small enough to read in full and
@@ -10,7 +13,7 @@ implement in full. Lamp implements all of it, from nothing, on a serial port.
 ```
 $ make test
 ...
-  checklist: 9 of 9 done
+  checklist: 11 of 11 done
   LAMP: LIT
 ```
 
@@ -21,17 +24,18 @@ No operating system, no libc, no bootloader, no disk, no network. The only piece
 of hardware it touches is the 16550 serial port at 0x3f8, polled, one byte at a
 time.
 
-The whole machine is 2,295 lines, counting non-blank lines with `/* */` and
-`//` comments stripped: 133 of assembly to reach long mode, 1,272 of C, 775 of
+The whole machine is 2,339 lines, counting non-blank lines with `/* */` and
+`//` comments stripped: 133 of assembly to reach long mode, 1,272 of C, 819 of
 tests, and 115 of headers. `make lines` runs the count, so the figure is a
 command and not a claim. (Stated that way because the previous figure, 1,991,
 could not be reproduced by any counting method and was therefore not worth
 carrying, and because a number nobody can re-derive is a number nobody should
 trust: the method is `tools/lines.awk`, and it is awk because a `/*` comment can
 open on one line and close on another, which any per-line filter gets wrong.
-This figure is larger than the 2,185 it replaces mostly because the headers are
-counted now, and it is smaller in the tests because this method strips a little
-more than whatever produced 780.) It
+The 819 of tests are 249 checks over the noun layer, the interpreter, the
+primitives, the reader and the book; the host compiler in `tools/hoon.c` is 605
+lines and is *not* in this figure, because it is not part of the machine — it is
+the thing that feeds it.) It
 implements Nock 4K — all twelve opcodes — over a noun representation where
 atoms are 63-bit numbers and cells point into an arena that only ever grows, so
 the state of the machine is a log and its history is everything it has already
@@ -46,6 +50,9 @@ binutils. Nothing else.
 make        # build build/boot.elf and build/boot.bin
 make run    # boot it, watch the serial line
 make test   # boot it, fail the build if any check fails
+make check  # the machine's suite and the compiler's, both
+make hoontest  # the host compiler's own 40 checks
+make teach  # compile four expressions and watch the guest run them
 make debug  # boot it with QEMU stopped at the reset vector
 make lines  # count the machine's lines, the way this README counts them
 make clean
@@ -83,6 +90,30 @@ step that produces it is a formula, so a line can read its own history: `[0 14
 before this one, `[0 18 0]` that line's answer. A line that crashes or runs out
 of steps says so and leaves the session exactly as it was.
 
+### Writing it in something that reads like a language
+
+`build/hoon` compiles a small Hoon-shaped language to that same bracket text, and
+`make teach` sends the result down the serial line and checks what comes back:
+
+```
+$ make build/hoon
+$ ./build/hoon '=+(/14 ~(/2 1 2))'
+[8 [[0 [14 0]] [[6 [[0 [2 0]] [[1 [1 0]] [[1 [2 0]] 0]]]] 0]]]
+$ ./build/hoon '+(2 3)'
+[1 [5 0]]
+$ ./build/hoon '+(/14 1)'
+hoon: addition of two values that are only known at run time has no Nock definition in this machine yet: the twenty native operations are a tested bank and not proven jets, and writing this rune as a native call would make the compiler answer questions the machine has never been asked.  +(2 3) works, because the host can fold that.
+```
+
+Ten forms: an atom, `/axis`, `?(a)`, `=(a b)`, `~(c t e)`, `*(a b)`, `|(a b)`,
+`+(a)`, `+(a b)` for two literals only, and `=+(a body)`. An address is checked
+against the subject the expression will be run on, so an address that is not
+there is refused by name rather than compiled — a wrong address on this machine
+usually names a real noun instead of crashing, and the whole point of the
+language is that it is loud about that. `docs/decisions.md` item 22 has the
+table and the reasons, and `docs/state.md` has the three things the compiler
+got wrong first.
+
 ## Layout
 
 ```
@@ -100,6 +131,8 @@ kernel/main.c      facts, self-test, checklist, halt
 tests/harness.c    the counters and expectations both suites share
 tests/nock-tests.c the Nock suite, with every expected value derived by hand
 tests/guestbook-tests.c  the reader and the book
+tools/hoon.c       the host compiler, and its 40 checks
+tools/lines.awk    the line count this README carries
 docs/decisions.md  every decision, why, and whether it is proven
 docs/state.md      where this stands, and what is still open
 ```
