@@ -143,28 +143,62 @@ could be read:
 
 ## Where Step 2 stands
 
-**Halfway, and the half that is done is done properly.** The self-test is 186
-checks, 0 failing, `LAMP: LIT`, checklist 10 of 10. A line of text typed at the
-machine comes back as the noun it is, and a line that is not a noun is refused
-with a reason.
+**Done.** The self-test is 226 checks, 0 failing, `LAMP: LIT`, checklist 11 of 11
+-- the eleventh being the new one, that a formula typed at the machine runs and
+what it leaves behind matters.  It was checked by breaking the count increment
+and watching the lamp go dark, because a checklist item that cannot fail is a
+sentence in a list rather than a check.
+A line of text typed at the machine comes back as the noun it is, a line that is
+not a noun is refused with a reason, and a line that is a formula is *run* -- on
+the session the last line left behind, and the answer goes into the history.
 
-Done: the serial line in both directions, line editing with backspace, a
-grammar for nouns in brackets, and a parser for it. The reader's suite is 47
-checks, and the last ten of them tie it to the interpreter -- a formula typed as
-text is compared against the same formula built in C, so everything the Nock
-suite proves about the built one is proved about the typed one too.
+```
+> [1 42 0]
+  42  (1 so far)
+> [1 7 0]
+  7  (2 so far)
+> [0 14 0]
+  2  (3 so far)
+> [1 2]
+  it crashed: formula is missing arguments
+  the session is as it was.
+> [0 8 0]
+  [0 [14 0]]  (4 so far)
+>
+  the session, newest first:
+    [0 [8 0]] answered [0 [14 0]]
+    [0 [14 0]] answered 2
+    [1 [7 0]] answered 7
+    [1 [42 0]] answered 42
+  4 entries, last answer [0 [14 0]]
+```
 
-Not done: the session. Nothing is kept yet, and the guest book says so when you
-leave it.
+A blank line shows the session, which is the only place C walks it: Nock has no
+loop, so printing a list of unknown length is C's job and nothing else is. The
+session is a noun and the book is one formula (`kernel/book.c`), with the whole
+derivation in comments next to it, because the derivation is the part worth
+reading twice. Both halves are tested: 47 checks for the reader, and the book's
+own group pins the address arithmetic, the shape of a session, two lines
+chained, a line reading its own history, a line that breaks, and a line that
+runs out of steps.
+
+The addresses are the cost of doing it properly, and they are in `decisions.md`
+item 19. Briefly: a session's parts are at `/2`, `/6`, `/14`; the line is run on
+`[line session]`, so the session is at `/3` and its parts are at `/6`, `/14` and
+`/30`. Every one of those numbers is a place a plausible guess is silently
+wrong.
 
 ### The four questions, answered
 
 1. **What is a session, concretely?** A session is `[log last count]`. The log
-   is newest-first, each entry `[line answer]`, so an append is one cons onto the
-   front and nothing existing is touched. `last` is the most recent subject, so
-   the next formula is evaluated against the state the last one produced. `count`
-   is the number of entries, which makes a blank line's "how long have we been
-   going" answer a noun rather than a counter in C.
+   is newest-first, each entry `[line answer]`, and `count` is the number of
+   entries, which makes a blank line's "how long have we been going" answer a
+   noun rather than a counter in C. One answer here changed while building it.
+   The plan was for `last` to be the most recent *subject*, with the next line
+   evaluated against the state the last one produced; what is built instead runs
+   every line on the whole previous session and keeps the last *answer*, which
+   is what makes the count and the log readable from inside a formula at all.
+   The plan would have made the history reachable only from C.
 2. **What does typing look like?** Settled by measurement, not taste: printable
    ASCII, enter submits a whole line, backspace deletes, Ctrl-D leaves. A line is
    one noun and is submitted on enter rather than evaluated as it is typed,
@@ -176,7 +210,7 @@ leave it.
    A 39-character formula costs 38 new cells and rewrites nothing. The cost of
    immutability here is that items have to be held until their order is known.
 4. **How much fits?** The arena is half the heap at 16 bytes a cell, and the
-   machine now says so: 8,317,440 cells with QEMU's 256MB, 406 used by the
+   machine now says so: 8,317,184 cells with QEMU's 256MB, 406 used by the
    self-test. A line costs about 3 cells at one character and about 130 at a
    full 128-character line, so a session runs to somewhere between tens of
    thousands and a couple of million entries -- and when the arena is full,

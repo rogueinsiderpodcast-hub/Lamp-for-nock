@@ -522,3 +522,60 @@ while: it passed QEMU's status straight through to make, so Ctrl-D -- the
 documented way to leave -- always reported a build error. Both directions of
 that mistake are invisible unless you pipe input into `make run`, which is
 exactly what a person does when they are not at a terminal.
+
+---
+
+## 19. The session is one noun, and its addresses are arithmetic
+
+**Decided:** the session is `[log last count]`, a three-element list, so it is
+five atoms deep and its parts are at `/2`, `/6` and `/14`. A line is run on
+`[line session]`, which puts the session at `/3`; reaching a part *of* it means
+putting one tail-step in front of the session's own path, so the log is at `/6`,
+the last answer at `/14` and the count at `/30`. The book is a single formula,
+`new = #[2 newlog #[6 answer #[14 newcount [0 0 0 0]]]]`, and the session is
+replaced rather than amended.
+
+**Why:** the book has to be a formula, because a C loop deciding what a session
+means would be the machine deciding something, and this machine's whole argument
+is that it does not. That forces two things that are easy to get wrong and
+invisible when you get them wrong. First, Nock has no cons: every noun in the
+step is a canned all-atoms template with its parts edited in, and an edit at
+axis 1 is not a cons but a replacement of the whole noun, so `#[1 x T]` is `x`
+whatever `T` was. The first version of this derivation wrote every edit at axis
+1 as though it were a cons and the book answered with the line it had been
+given. Second, addresses are read from the right, so the parts of a list are at
+2, 6, 14 and not at 2, 3, 4; and an address is not something you multiply by
+three to move into a containing noun, because a noun sitting at an odd axis has
+its path pushed along rather than its number. `/5`, `/13` and `/29` are the
+tempting wrong answers, and each gives a different noun rather than an error.
+
+**Cost:** the numbers are in `kernel/book.c` next to the derivation, and pinned
+by tests, because they are the part of this file that is easy to write wrongly
+and hard to see. What it buys is that a line can read its own history from
+inside a formula: `[0 14 0]` answers how many lines have run, `[0 6 0]` the last
+answer, `[0 8 0]` the line before it and `[0 18 0]` that line's answer. None of
+that is C.
+
+---
+
+## 20. A line that fails leaves the session exactly as it was
+
+**Decided:** the book builds a new noun and never edits the old one, so a line
+that crashes, or that runs out of steps, changes nothing and says which of the
+two it was. Both reasons are told apart in the message: a formula that gives up
+is not a formula that broke. The count does not move, and the next line runs on
+the session as it was.
+
+**Why:** a machine that lost its history to a typo would be a machine worth
+distrusting, and a session is the one thing here that cannot be rebuilt. It is
+also the cheapest possible guarantee: nothing has to be undone, because nothing
+was done. The two failure modes being separate news matters more than it looks --
+`nock_run` returns a distinct code for them, and a reader who was told "it
+crashed" about a formula that merely took too long would be told something
+false.
+
+**Cost:** the step limit is ten million, far more than any hand-typed formula
+needs, so the test lowers it for one line and hands it back. A real session that
+runs out of steps is therefore only reachable by a formula built in C, which is
+a Step 3 question. The step limit itself is not a property of the book: it is
+the interpreter's, and it was tested there first.

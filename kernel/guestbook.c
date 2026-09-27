@@ -266,23 +266,28 @@ static void gb_line_push(u8 c)
     serial_putc((char)c);
 }
 
+/* The session, in one noun.  It is the only state the guest book has, and it
+ * lives here rather than in the C around it: the loop below has no variables of
+ * its own to speak of. */
+static noun gb_session;
+
+static void gb_show_session(void);
+
 /* Everything that happens when a line is finished.  The byte buffer and the
- * echo above are the whole of the terminal handling; this is where the machine
- * starts being a machine. */
+ * echo above are the whole of the terminal handling, and everything worth
+ * reading is below: read a noun, hand it and the session to one formula, print
+ * what came back. */
 static void gb_submit(void)
 {
-    noun formula = 0;
+    noun line = 0;
     const char *why = "";
 
     serial_put_nl();
 
-    int rc = gb_parse(gb_line, gb_line_len, &formula, &why);
+    int rc = gb_parse(gb_line, gb_line_len, &line, &why);
 
     if (rc == GB_PARSE_EMPTY) {
-        /* A blank line is not an error and not a noun.  Once the session exists
-         * it is the request to be shown the session, and saying so now is honest
-         * rather than a placeholder. */
-        serial_puts("  (nothing typed; the session is not here yet)\n");
+        gb_show_session();
         return;
     }
     if (rc != GB_PARSE_OK) {
@@ -292,21 +297,127 @@ static void gb_submit(void)
         return;
     }
 
-    /* The noun, and nothing else.  Whether it is a formula and what it means is
-     * the next question, and guessing at it here would be the reader lying about
-     * what it knows. */
-    serial_puts("  that is the noun ");
-    noun_print(formula);
-    serial_put_nl();
+    noun next = 0;
+    int code = gb_step(line, gb_session, &next);
+
+    if (code != NOCK_OK) {
+        /* The session is not touched.  The book builds a new noun and never
+         * edits the old one, so a line that crashed leaves nothing to undo --
+         * and a machine that lost its history to a typo would be a machine
+         * worth distrusting. */
+        if (code == NOCK_STEPS_OUT)
+            serial_puts("  it ran out of steps.\n");
+        else {
+            serial_puts("  it crashed: ");
+            serial_puts(nock_crash_reason());
+            serial_puts("\n");
+        }
+        serial_puts("  the session is as it was.\n");
+        /* The machine is not crashed: the line was, and the reason has been
+         * said.  Leaving the error set would silence every noun_print from here
+         * on, because the printer stops the moment the machine has crashed. */
+        machine_reset_error();
+        return;
+    }
+
+    gb_session = next;
+
+    serial_puts("  ");
+    noun_print(gb_last(gb_session));
+    serial_puts("  (");
+    noun_print(gb_count(gb_session));
+    serial_puts(" so far)\n");
+}
+
+/* A blank line asks to be shown the session.  The log is walked here rather
+ * than by a formula, and the reason is worth stating: Nock cannot loop, so a
+ * formula can reach the newest entry but cannot count them.  Walking to print
+ * is I/O, which is the one thing C is for, and nothing is decided on the way
+ * past. */
+static void gb_show_session(void)
+{
+    noun l = gb_log(gb_session);
+    u64  n = 0;
+
+    serial_puts("  the session, newest first:\n");
+    while (noun_is_cell(l)) {
+        noun entry = gb_log_front(l);
+        serial_puts("    ");
+        noun_print(gb_entry_line(entry));
+        serial_puts(" answered ");
+        noun_print(gb_entry_answer(entry));
+        serial_put_nl();
+        l = gb_log_rest(l);
+        n++;
+    }
+    if (n == 0)
+        serial_puts("    (nothing has been run yet)\n");
+
+    serial_puts("  ");
+    noun_print(gb_count(gb_session));
+    if (n == 0) {
+        serial_puts(" lines, none run\n");
+    } else {
+        serial_puts(n == 1 ? " entry, last answer " : " entries, last answer ");
+        noun_print(gb_last(gb_session));
+        serial_put_nl();
+    }
+}
+
+/* The same question about the book: does a formula typed at the machine run,
+ * and does what it leaves behind matter?  Beside gb_reader_ok because these two
+ * are the checklist's whole claim about the guest book, and a claim is only
+ * worth making if it is worth checking. */
+int gb_session_ok(void)
+{
+    static const char first[]  = "[1 42 0]";
+    static const char second[] = "[0 14 0]";
+    static const char broken[] = "[1 2]";
+    noun one = 0;
+    noun two = 0;
+    noun s1  = 0;
+    noun s2  = 0;
+    noun out = 0;
+    const char *why = "";
+
+    if (gb_parse(first, sizeof first - 1, &one, &why) != GB_PARSE_OK)
+        return 0;
+
+    /* [1 42 0] is the constant 42, so the answer is 42 and there is one entry. */
+    if (gb_step(one, gb_empty_session(), &s1) != NOCK_OK)
+        return 0;
+    if (!noun_equal(gb_last(s1), noun_atom(42)) || !noun_equal(gb_count(s1), noun_atom(1)))
+        return 0;
+
+    /* A line asking how many lines have run is answered from before it was
+     * asked -- the subject is the session as it was -- and asking still counts,
+     * so there are two entries afterwards. */
+    if (gb_parse(second, sizeof second - 1, &two, &why) != GB_PARSE_OK)
+        return 0;
+    if (gb_step(two, s1, &s2) != NOCK_OK)
+        return 0;
+    if (!noun_equal(gb_last(s2), noun_atom(1)) || !noun_equal(gb_count(s2), noun_atom(2)))
+        return 0;
+
+    /* A line that breaks changes nothing, which is the part that makes the
+     * history worth keeping. */
+    if (gb_parse(broken, sizeof broken - 1, &two, &why) != GB_PARSE_OK)
+        return 0;
+    if (gb_step(two, s2, &out) == NOCK_OK)
+        return 0;
+    machine_reset_error();
+
+    return out == 0
+        && noun_equal(gb_count(s2), noun_atom(2))
+        && noun_equal(gb_last(s2), noun_atom(1));
 }
 
 /* One question the checklist can ask about the reader before anyone has typed
  * anything: does a line of text come back as the noun it is?
  *
- * The checklist is printed on the way into the guest book, and most of its lines
- * are claims this file cannot check.  This is one that can be, and it is the one
- * that matters, because everything the guest book will do is a noun somebody
- * typed. */
+ * Most of the checklist's lines are claims this file cannot check.  This is one
+ * that can be, and it is the one that matters, because everything the guest book
+ * will do is a noun somebody typed. */
 int gb_reader_ok(void)
 {
     static const char text[] = "[1 42 0]";
@@ -326,8 +437,15 @@ void gb_run(void)
     serial_put_nl();
     serial_puts("== guest book\n");
     serial_puts("--------------------------------------------------------------\n");
-    serial_puts("  type a noun, in brackets, and press enter.  Ctrl-D leaves.\n");
+    serial_puts("  type a formula and press enter.  A blank line shows the\n");
+    serial_puts("  session.  Ctrl-D leaves.\n");
+    serial_put_nl();
+    serial_puts("  [1 42 0] is the constant 42.  [0 14 0] is how many lines\n");
+    serial_puts("  have been run.  [0 8 0] is the last line typed.\n");
+    serial_put_nl();
     serial_puts("  > ");
+
+    gb_session = gb_empty_session();
 
     for (;;) {
         u8 c = serial_getc();
@@ -354,6 +472,10 @@ void gb_run(void)
     }
 
     serial_put_nl();
-    serial_puts("  leaving the guest book.  nothing was kept.\n");
+    serial_puts("  leaving the guest book, with ");
+    noun_print(gb_count(gb_session));
+    serial_puts(noun_atom_val(gb_count(gb_session)) == 1 ? " line in it." : " lines in it.");
+    serial_puts("  the machine is finished, so the\n");
+    serial_puts("  session goes with it.  nothing here is written down.\n");
     serial_put_nl();
 }

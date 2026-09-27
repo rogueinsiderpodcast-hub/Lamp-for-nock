@@ -103,6 +103,22 @@ void        nock_jet_hooks(int enable);
 u64         nock_opcode(noun formula);   /* 0..11, or NOCK_NO_OPCODE */
 #define NOCK_NO_OPCODE 0xFFFFFFFFFFFFFFFFULL
 
+/* --- book.c -------------------------------------------------------------
+ *
+ * The session, and the one formula that carries it from a line to the next.
+ * Everything the guest book knows is in these nouns; the C is only I/O.  See
+ * the file for the derivation the code is a transcription of. */
+noun gb_book(void);
+noun gb_empty_session(void);
+noun gb_log(noun s);
+noun gb_last(noun s);
+noun gb_count(noun s);
+noun gb_entry_line(noun entry);
+noun gb_entry_answer(noun entry);
+noun gb_log_front(noun log);
+noun gb_log_rest(noun log);
+int  gb_step(noun line, noun session, noun *out);
+
 /* --- guestbook.c -------------------------------------------------------- */
 /* The guest book: the first thing on the machine that answers.
  *
@@ -117,6 +133,7 @@ u64         nock_opcode(noun formula);   /* 0..11, or NOCK_NO_OPCODE */
 
 int  gb_parse(const char *text, u64 len, noun *out, const char **why);
 int  gb_reader_ok(void);
+int  gb_session_ok(void);
 u64  noun_capacity(void);
 void gb_run(void);
 

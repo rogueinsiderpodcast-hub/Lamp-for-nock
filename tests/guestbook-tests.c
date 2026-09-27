@@ -95,6 +95,23 @@ static void parse_fails(const char *what, const char *text, const char *why_expe
  * noun rather than the reading of it.  The length is measured, never written
  * out: a formula here is long enough to miscount, and a miscounted length is a
  * bug in the test that looks exactly like a bug in the reader. */
+/* Whether a message says something in particular.  The crash reason is only
+ * readable until the machine is reset, so this is how a test gets at it. */
+static int mentions(const char *text, const char *needle)
+{
+    u64 n = 0;
+    while (needle[n] != 0)
+        n++;
+    for (u64 i = 0; text[i] != 0; i++) {
+        u64 j = 0;
+        while (j < n && text[i + j] == needle[j])
+            j++;
+        if (j == n)
+            return 1;
+    }
+    return 0;
+}
+
 static noun typed(const char *text)
 {
     noun out = 0;
@@ -319,6 +336,160 @@ static void test_against_the_interpreter(void)
                 NOCK_CRASH, cell_subject, typed("7"));
 }
 
+/* --- the book ----------------------------------------------------------- */
+/* The book is the guest book's whole behaviour: one formula, one session in, one
+ * session out.  These tests are written as nouns, each with the shape spelled
+ * out beside it, so a failure says which of the six fields went wrong. */
+
+static void test_the_book(void)
+{
+    group("the book: one line, one session");
+
+    /* Where a list's parts are, which is the arithmetic the whole book rests
+     * on.  [1 2 3] is C(1, C(2, C(3, 0))): an even axis takes a head, an odd
+     * one a tail, and each part of a list lands at twice the last plus two. */
+    {
+        noun list = C(A(1), C(A(2), C(A(3), A(0))));
+        expect_true("a list's head is at /2",        noun_equal(noun_slot(list, 2),  A(1)));
+        expect_true("its tail is at /3",             noun_equal(noun_slot(list, 3),  C(A(2), C(A(3), A(0)))));
+        expect_true("its second part is at /6, not /5",  noun_equal(noun_slot(list, 6),  A(2)));
+        expect_true("its third part is at /14, not /13", noun_equal(noun_slot(list, 14), A(3)));
+    }
+
+    /* The book's subject is [line session], so the session sits at /3, and a
+     * part of it needs one tail-step in front of its own path.  Multiplying by
+     * three, or doubling and adding one, both give a different noun rather than
+     * an error, which is what the first version of book_build did. */
+    {
+        noun line    = f1(1, A(42));
+        noun log     = A(0);
+        noun last    = A(7);
+        noun count   = A(2);
+        noun session = C(log, C(last, C(count, A(0))));
+        noun subject = C(line, session);
+        expect_true("the line is at /2",         noun_equal(noun_slot(subject, 2),  line));
+        expect_true("the session is at /3",      noun_equal(noun_slot(subject, 3),  session));
+        expect_true("its log is at /6, not /5",  noun_equal(noun_slot(subject, 6),  log));
+        expect_true("its last answer at /14",    noun_equal(noun_slot(subject, 14), last));
+        expect_true("its count is at /30",       noun_equal(noun_slot(subject, 30), count));
+        expect_true("and /5 is the line's tail, not the log",
+                    noun_equal(noun_slot(subject, 5), noun_tail(line)));
+    }
+
+    /* A fresh session is [0 0 0]: no log, no last answer, nothing run.  As a
+     * list that is four zeros, the three fields and the 0 every list ends in. */
+    expect_noun("an empty session is [0 0 0]",
+                A(0), f1(1, gb_empty_session()), C(A(0), C(A(0), C(A(0), A(0)))));
+
+    /* One line, one step.  The line [1 42 0] is the constant 42.
+     *
+     *   answer    = 42
+     *   entry     = [line [answer 0]]   = [[1 42 0] [42 0]]
+     *   log       = [entry 0]           = [[[1 42 0] [42 0]] 0]
+     *   count     = 1
+     *   new       = [log answer count]
+     */
+    {
+        noun line   = f1(1, A(42));
+        noun answer = A(42);
+        noun entry  = C(line, C(answer, A(0)));            /* [line [answer 0]] */
+        noun newlog = C(entry, C(A(0), A(0)));             /* [entry [0 0]]     */
+        noun want   = C(newlog, C(answer, C(A(1), A(0)))); /* [log [answer [1 0]]] */
+
+        expect_noun("one line gives one entry, and the answer in it",
+                    C(line, gb_empty_session()), gb_book(), want);
+
+        /* The same step, read through the names rather than the shape.  These are
+         * the three addresses a person needs and the one they get wrong. */
+        noun out = 0;
+        expect_true("the step succeeds",
+                    gb_step(line, gb_empty_session(), &out) == NOCK_OK);
+        expect_true("the last answer is at /6 of the session, not /3", noun_equal(gb_last(out), A(42)));
+        expect_true("the count is at /14 of the session, not /8", noun_equal(gb_count(out), A(1)));
+        expect_true("the log is the entry, newest first",
+                    noun_equal(gb_log(out), newlog));
+        expect_true("the log's front is the entry",
+                    noun_equal(gb_log_front(gb_log(out)), entry));
+        expect_true("and the entry holds the line that was typed",
+                    noun_equal(gb_entry_line(gb_log_front(gb_log(out))), line));
+        expect_true("and the answer that came back",
+                    noun_equal(gb_entry_answer(gb_log_front(gb_log(out))), A(42)));
+        expect_true("and nothing left after it, at /6 of the log",
+                    gb_log_rest(gb_log(out)) == A(0));
+    }
+
+    /* Two lines, and the second run on the session the first left.  This is the
+     * whole point of a session: the second line can read the first. */
+    {
+        noun one  = typed("[1 42 0]");
+        noun two  = typed("[1 7 0]");
+        noun s1   = 0;
+        noun s2   = 0;
+        expect_true("the first line runs",  gb_step(one, gb_empty_session(), &s1) == NOCK_OK);
+        expect_true("the second runs on the first's session", gb_step(two, s1, &s2) == NOCK_OK);
+        expect_true("so there are 2 lines, not 1", noun_equal(gb_count(s2), A(2)));
+        expect_true("the newest entry is the second line",
+                    noun_equal(gb_entry_line(gb_log_front(gb_log(s2))), two));
+        expect_true("and behind it, at /6 of the log, is the first",
+                    noun_equal(gb_entry_line(gb_log_front(gb_log_rest(gb_log(s2)))), one));
+        expect_true("and behind that is nothing",
+                    gb_log_rest(gb_log_rest(gb_log(s2))) == A(0));
+    }
+
+    /* Reading the session from inside a formula, which is the thing the C is
+     * not doing: these go through the book like any other line. */
+    {
+        noun first = typed("[1 42 0]");
+        noun s     = 0;
+        noun out   = 0;
+        expect_true("a session with one line in it", gb_step(first, gb_empty_session(), &s) == NOCK_OK);
+
+        expect_true("a line can ask how many lines have run",
+                    gb_step(typed("[0 14 0]"), s, &out) == NOCK_OK);
+        expect_true("... and be told 1, which was true when it asked",
+                    noun_equal(gb_last(out), A(1)));
+        expect_true("... and asking still counts as a line", noun_equal(gb_count(out), A(2)));
+
+        expect_true("a line can ask for the line before it",
+                    gb_step(typed("[0 8 0]"), s, &out) == NOCK_OK);
+        expect_true("... and be given the line that was typed",
+                    noun_equal(gb_last(out), first));
+
+        expect_true("a line can ask for the answer before it",
+                    gb_step(typed("[0 6 0]"), s, &out) == NOCK_OK);
+        expect_true("... and be given 42", noun_equal(gb_last(out), A(42)));
+    }
+
+    /* A line that breaks changes nothing.  The book builds a new noun and never
+     * edits the old one, so there is nothing to undo, and a machine that lost
+     * its history to a typo would be a machine worth distrusting. */
+    {
+        noun s   = 0;
+        noun out = 0;
+        expect_true("a session to lose", gb_step(typed("[1 42 0]"), gb_empty_session(), &s) == NOCK_OK);
+        expect_true("a line that is not a formula stops on the interpreter's complaint",
+                    gb_step(typed("[1 2]"), s, &out) == NOCK_CRASH);
+        expect_true("... saying the formula was missing arguments",
+                    mentions(nock_crash_reason(), "missing arguments"));
+        machine_reset_error();
+        expect_true("and the session is untouched, since the count did not move",
+                    noun_equal(gb_count(s), A(1)) && out == 0);
+        expect_true("and the next line still runs on it",
+                    gb_step(typed("[1 7 0]"), s, &out) == NOCK_OK && noun_equal(gb_count(out), A(2)));
+    }
+
+    /* Running out of steps is not crashing, and the two are told apart: a
+     * formula that gives up and a formula that breaks are different news.  The
+     * limit is ten million, far too many to reach by typing, so this one line
+     * gets a small limit and then hands it back. */
+    {
+        nock_init(8);
+        expect_code("a formula that runs out of steps stops, rather than going on",
+                    NOCK_STEPS_OUT, C(typed("[1 42 0]"), gb_empty_session()), gb_book());
+        nock_init(NOCK_DEFAULT_STEP_LIMIT);
+    }
+}
+
 int guestbook_tests_run(void)
 {
     /* No noun_init() here.  The arena is allocated once, at boot, and
@@ -331,6 +502,7 @@ int guestbook_tests_run(void)
     test_cells();
     test_refusals();
     test_against_the_interpreter();
+    test_the_book();
 
     return tests_failed_count();
 }

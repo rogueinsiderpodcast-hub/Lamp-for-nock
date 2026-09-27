@@ -37,7 +37,7 @@ KERNEL  := $(BUILD)/boot.elf
 IMAGE   := $(BUILD)/boot.bin
 
 C_SRCS  := kernel/serial.c kernel/memory.c kernel/noun.c kernel/nock.c \
-           kernel/primitives.c kernel/guestbook.c kernel/main.c \
+           kernel/primitives.c kernel/book.c kernel/guestbook.c kernel/main.c \
            tests/harness.c tests/nock-tests.c tests/guestbook-tests.c
 ASM_SRCS := boot/boot.S
 OBJS    := $(patsubst %.c,$(BUILD)/%.o,$(C_SRCS)) \

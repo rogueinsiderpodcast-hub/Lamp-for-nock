@@ -21,8 +21,10 @@ No operating system, no libc, no bootloader, no disk, no network. The only piece
 of hardware it touches is the 16550 serial port at 0x3f8, polled, one byte at a
 time.
 
-The whole machine is 1,991 lines, counting code but not comments or blank
-lines: 133 of assembly to reach long mode, 1,200 of C, and 658 of tests. It
+The whole machine is 2,185 lines, counting non-blank lines with `/* */` and
+`//` comments stripped: 133 of assembly to reach long mode, 1,272 of C, and 780
+of tests. (Stated that way because the previous figure, 1,991, could not be
+reproduced by any counting method and was therefore not worth carrying.) It
 implements Nock 4K — all twelve opcodes — over a noun representation where
 atoms are 63-bit numbers and cells point into an arena that only ever grows, so
 the state of the machine is a log and its history is everything it has already
@@ -52,7 +54,20 @@ one binary, so there is no test mode to switch into.
 
     printf '[1 42 0]\n\004' | make run
 
-Type a noun in brackets, press enter, and the machine tells you what it read.
+Type a formula in brackets and press enter, and the machine runs it and answers:
+
+    > [1 42 0]
+      42  (1 so far)
+    > [1 7 0]
+      7  (2 so far)
+    > [0 14 0]
+      2  (3 so far)
+
+A blank line prints the session, newest first. The session is a noun and the
+step that produces it is a formula, so a line can read its own history: `[0 14
+0]` is how many lines have run, `[0 6 0]` the last answer, `[0 8 0]` the line
+before this one, `[0 18 0]` that line's answer. A line that crashes or runs out
+of steps says so and leaves the session exactly as it was.
 
 ## Layout
 
@@ -65,9 +80,14 @@ kernel/memory.c    PVH memory map, bump allocator
 kernel/noun.c      nouns, slot, edit, structural equality
 kernel/nock.c      the interpreter
 kernel/primitives.c  the twenty native primitives
+kernel/book.c      the guest book's one formula, and the session it builds
+kernel/guestbook.c  the line editor, the parser, the loop, the display
 kernel/main.c      facts, self-test, checklist, halt
-tests/nock-tests.c the test suite, with every expected value derived by hand
+tests/harness.c    the counters and expectations both suites share
+tests/nock-tests.c the Nock suite, with every expected value derived by hand
+tests/guestbook-tests.c  the reader and the book
 docs/decisions.md  every decision, why, and whether it is proven
+docs/state.md      where this stands, and what is still open
 ```
 
 ## What is verified, and what is not
@@ -109,8 +129,9 @@ This matters more than the feature list, so it is stated plainly.
   interpreter is the only one here, and the tests were written from the same
   reading of the rules, so a misreading would not be caught (item 11)
 
-None of these are hard. They are the work of Step 2, and they are listed rather
-than buried.
+None of these are hard, and none of them is the guest book: the session is a
+noun and the step is a formula, so what is left here is a question about Hoon
+and about jets, which is Step 3. They are listed rather than buried.
 
 ## The idea this is a piece of
 
