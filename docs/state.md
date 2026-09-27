@@ -326,9 +326,36 @@ No loops, so no Hoon recursion: `=+(a ~(c =+(a b) 0))` is the shape every
 recursion takes and it cannot be written. No run-time addition, on purpose. No
 types beyond "an address the session has" and "a value the machine can put in a
 noun", no user-defined cores, and nothing that could grow past a line of 4096
-characters. The next step is not more of this language; it is the native
-operations proven against their Nock definitions, which is what unblocks
-`+(a b)` and is the first job of the step after this one.
+characters.
+
+The next step is not more of this language; it is the native operations proven
+against their Nock definitions, which is what unblocks `+(a b)`. Work on that
+started, and it turned the next step into a smaller question than it looked like.
+
+**Two of the twenty are proved.** `make proofs` carries the Nock definitions of
+`+inc` and `+eq`, runs each through the machine's own reader, printer and
+interpreter, and requires it to agree with the native over 1,412 inputs --
+including on which inputs stop, since a native that answers where its definition
+would have stopped is the one way to make a wrong machine faster.
+
+**The other eighteen are blocked, and the reason is worth having.** The blocker
+is not arithmetic. It is that a loop in Nock is a core that calls its own arm,
+which is a noun containing itself, which in Hoon is written with a *name*:
+`=+(a b)`, where `a` names the arm being written. This language has no names, so
+it cannot write a core that refers to itself, so it cannot write any definition
+that iterates -- and `+add`, the four comparisons, `+div`, `+mul` and the six
+bitwise and shift operations are all 63-step loops. Unrolling 63 steps is longer
+than a line of input and proves nothing extra.
+
+So the next step is **names**, not proofs, and the evidence for that is the pair
+that did get proved: `+inc` and `+eq` are exactly the two whose Nock definition
+is a single opcode with no iteration in it. Every native is now named in one of
+two tables in `tools/jet-proofs.c` -- proved, or pending with the reason it is
+pending -- and a primitive in neither is a failure, so this gap cannot quietly
+grow back open.
+
+What this does *not* do: it does not unblock `+(a b)`. That still needs `+add`,
+and `+add` needs a loop.
 
 ## The questions waiting on the bridge
 

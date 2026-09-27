@@ -4,6 +4,7 @@
 #   make run        boot it and watch the serial line
 #   make test       boot it, print the self-test, fail the build if it fails
 #   make hoontest   compile, and check the output with the machine's own code
+#   make proofs     the native primitives against their Nock definitions
 #   make teach      compile an expression and run it on the real machine
 #   make check      both suites
 #   make debug      boot it with QEMU stopped at the reset vector
@@ -76,11 +77,23 @@ HOSTCFLAGS := -std=c11 -O2 -g \
               -Ikernel
 
 HOON      := $(BUILD)/hoon
-HOON_SRCS := tools/hoon.c kernel/noun.c kernel/nock.c kernel/primitives.c \
-             kernel/book.c kernel/guestbook.c
+HOON_SRCS := tools/hoon.c tools/host-machine.c kernel/noun.c kernel/nock.c \
+             kernel/primitives.c kernel/book.c kernel/guestbook.c
 HOON_OBJS := $(patsubst %.c,$(BUILD)/host/%.o,$(HOON_SRCS))
 
-.PHONY: all run test debug clean lines hoontest teach check
+# The jet proofs: the native primitives against the Nock definitions that say
+# what they are allowed to be.  Hosted, like the compiler, because a definition
+# is a piece of text and the battery over it is thousands of cases -- the
+# machine's own suite stays the small set of things that must be checked inside
+# the image.  Same objects as the compiler, so the two cannot drift apart on
+# what the interpreter does.
+PROOFS      := $(BUILD)/jet-proofs
+PROOFS_SRCS := tools/jet-proofs.c tools/host-machine.c kernel/noun.c \
+               kernel/nock.c kernel/primitives.c kernel/book.c \
+               kernel/guestbook.c
+PROOFS_OBJS := $(patsubst %.c,$(BUILD)/host/%.o,$(PROOFS_SRCS))
+
+.PHONY: all run test debug clean lines hoontest proofs teach check
 
 all: $(KERNEL)
 
@@ -140,6 +153,12 @@ lines:
 hoontest: $(HOON)
 	@./$(HOON) --selftest
 
+# Every native, accounted for: proved against a Nock definition, or listed with
+# the reason it has none yet.  A primitive that is neither is a primitive whose
+# right to exist has never been argued, and this is where that shows up.
+proofs: $(PROOFS)
+	@./$(PROOFS)
+
 # The bridge, end to end.  This is the whole of step 3: the host compiles an
 # expression, the text goes down the serial line as characters, the guest's
 # reader reads it, the guest's interpreter runs it, and the answer comes back.
@@ -178,8 +197,8 @@ teach: $(KERNEL) $(HOON)
 
 # Both suites.  The machine's own first, because it is the thing everything else
 # is a claim about.
-check: test hoontest
-	@echo "make check: the machine's suite and the compiler's both passed"
+check: test hoontest proofs
+	@echo "make check: the machine's suite, the compiler's, and the jet proofs all passed"
 
 debug: $(KERNEL)
 	qemu-system-x86_64 -machine pc -m 256 -no-reboot \
@@ -195,6 +214,9 @@ $(BUILD)/host/%.o: %.c
 
 $(HOON): $(HOON_OBJS)
 	$(CC) $(HOSTCFLAGS) -o $@ $(HOON_OBJS)
+
+$(PROOFS): $(PROOFS_OBJS)
+	$(CC) $(HOSTCFLAGS) -o $@ $(PROOFS_OBJS)
 
 $(BUILD)/%.o: %.S
 	@mkdir -p $(dir $@)

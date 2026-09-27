@@ -35,7 +35,7 @@ open on one line and close on another, which any per-line filter gets wrong.
 The 819 of tests are 249 checks over the noun layer, the interpreter, the
 primitives, the reader and the book; the host compiler in `tools/hoon.c` is 605
 lines and is *not* in this figure, because it is not part of the machine — it is
-the thing that feeds it.) It
+the thing that feeds it, and neither is `tools/jet-proofs.c`.) It
 implements Nock 4K — all twelve opcodes — over a noun representation where
 atoms are 63-bit numbers and cells point into an arena that only ever grows, so
 the state of the machine is a log and its history is everything it has already
@@ -50,8 +50,9 @@ binutils. Nothing else.
 make        # build build/boot.elf and build/boot.bin
 make run    # boot it, watch the serial line
 make test   # boot it, fail the build if any check fails
-make check  # the machine's suite and the compiler's, both
+make check  # all three suites: machine, compiler, jet proofs
 make hoontest  # the host compiler's own 40 checks
+make proofs  # the native primitives against their Nock definitions
 make teach  # compile four expressions and watch the guest run them
 make debug  # boot it with QEMU stopped at the reset vector
 make lines  # count the machine's lines, the way this README counts them
@@ -132,6 +133,8 @@ tests/harness.c    the counters and expectations both suites share
 tests/nock-tests.c the Nock suite, with every expected value derived by hand
 tests/guestbook-tests.c  the reader and the book
 tools/hoon.c       the host compiler, and its 40 checks
+tools/jet-proofs.c the natives against their Nock definitions
+tools/host-machine.c  the machine's serial and heap, stood up on the host
 tools/lines.awk    the line count this README carries
 docs/decisions.md  every decision, why, and whether it is proven
 docs/state.md      where this stands, and what is still open
@@ -159,6 +162,12 @@ This matters more than the feature list, so it is stated plainly.
 - determinism: the same subject and formula give the same answer twice
 - a jet firing from a dynamic hint, and the answer being identical with the
   hook enabled and disabled
+- two of the twenty primitives against their Nock definitions, in `make proofs`:
+  `+inc` and `+eq` are read by the machine's own reader, printed back by the
+  machine's own printer, run by the machine's own interpreter, and required to
+  agree with the native over 1,412 inputs — including on which inputs stop, since
+  a native that answers where its definition would have stopped is the one way to
+  make a wrong machine faster
 
 **Not verified, and said so in `docs/decisions.md`:**
 
@@ -166,10 +175,14 @@ This matters more than the feature list, so it is stated plainly.
   own expansions for them do not bracket into valid formulas, so they are
   implemented from the accompanying prose, which is what `urbit/vere` does
   (item 6)
-- that the twenty primitives are equivalent to any Nock formula. In Urbit these
-  are jets, and a jet is only legitimate because it computes what its Nock
-  definition computes. There is no Hoon compiler or standard library here yet,
-  so there is nothing to compare against (item 9)
+- that the other eighteen primitives are equivalent to any Nock formula, which is
+  most of them. In Urbit these are jets, and a jet is only legitimate because it
+  computes what its Nock definition computes. The blocker is not arithmetic: a
+  loop in Nock is a core that calls its own arm, which is a noun containing
+  itself, which Hoon writes with a *name* — and this language has no names yet.
+  `+add` and the comparisons and `+div` are all 63-step loops, so they wait for
+  that. Every primitive is named in one of two tables in `tools/jet-proofs.c`,
+  proved or pending-with-a-reason, and one in neither fails the suite (item 9)
 - the hint convention used to dispatch jets is ours, not Urbit's. It is a
   demonstration that the mechanism works, and it is labelled as ours (item 10)
 - the rules were not cross-checked against a second implementation. The

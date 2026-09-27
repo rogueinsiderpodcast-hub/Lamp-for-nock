@@ -127,85 +127,7 @@
  * definitions are the same pointer cast, but saying it twice is a warning. */
 #undef NULL
 #include "kernel.h"
-
-/* --- the machine, on the host -------------------------------------------- */
-/* The kernel's serial and memory, with the parts that are not the point
- * replaced.  Everything that is the point -- nouns, Nock, the book, the reader
- * -- is the machine's own code, linked in and not reimplemented here, so that
- * "the compiler agrees with the machine" is not a claim about two copies of
- * the machine. */
-
-static char     host_heap[4 * 1024 * 1024];
-/* The heap starts one word in, and never all the way at the front, because an
- * allocator that hands out NULL for its first allocation is indistinguishable
- * from one that has run out -- and noun_init() reads NULL as failure and
- * carries on with a null arena, which crashes a long way from here.  The
- * machine's own memory.c gets this for free by pointing above the boot
- * parameters; a static array has nobody else to point above. */
-static uintptr_t host_used = sizeof(void *);
-
-u64 mem_heap_start(void) { return (u64)(uintptr_t)host_heap; }
-u64 mem_heap_end(void)   { return (u64)(uintptr_t)host_heap + sizeof host_heap; }
-
-void *mem_alloc(u64 size, u64 align)
-{
-    /* Offsets, not addresses: want and host_used are both measured from the
-     * front of host_heap, and only the last line turns one into a pointer. */
-    uintptr_t want = host_used + (align ? align - 1 : 0);
-
-    want &= ~(uintptr_t)(align - 1);
-    if (want + size > (uintptr_t)sizeof host_heap)
-        return NULL;
-    host_used = want + size;
-    return host_heap + want;
-}
-
-/* The serial line, in two modes: straight to stdout, or captured into a buffer
- * so the self-test can compare the machine's own printed text against a
- * hand-written expectation. */
-
-static char   cap_buf[GB_LINE_MAX + 2];
-static size_t cap_len;
-static int    cap_on;
-static int    cap_over;
-
-static void cap_putc(char c)
-{
-    if (!cap_on) {
-        putchar(c);
-        return;
-    }
-    if (cap_len + 1 >= sizeof cap_buf) {
-        cap_over = 1;
-        return;
-    }
-    cap_buf[cap_len++] = c;
-}
-
-void serial_putc(char c) { cap_putc(c); }
-
-void serial_put_dec(u64 v)
-{
-    char buf[24];
-    int  n = 0;
-
-    if (v == 0) {
-        cap_putc('0');
-        return;
-    }
-    while (v > 0 && n < (int)sizeof buf) {
-        buf[n++] = (char)('0' + (v % 10));
-        v /= 10;
-    }
-    while (n-- > 0)
-        cap_putc(buf[n]);
-}
-
-void serial_puts(const char *s) { while (*s) cap_putc(*s++); }
-void serial_put_nl(void)         { cap_putc('\n'); }
-
-void serial_put_hex(u64 v) { serial_puts("0x"); serial_put_dec(v); }
-u8   serial_getc(void)     { return 0; }
+#include "host-machine.h"
 
 /* --- refusals ------------------------------------------------------------- */
 /* A refusal is not an error in the machine's sense: nothing has been written
@@ -744,17 +666,14 @@ static noun compile(const char *text)
     return formula;
 }
 
-/* Print a noun the way the machine prints one, into cap_buf, so the text can be
+/* Print a noun the way the machine prints one, into the capture buffer, so the text can be
  * compared and read back. */
 static size_t print_to_capture(noun n)
 {
-    cap_len = 0;
-    cap_over = 0;
-    cap_on = 1;
+    capture_begin();
     noun_print(n);
-    cap_on = 0;
-    cap_buf[cap_len] = '\0';
-    return cap_len;
+    capture_end();
+    return capture_len();
 }
 
 /* --- the self-test ------------------------------------------------------------- */
@@ -991,11 +910,11 @@ static int selftest(void)
          *    settles it. */
         if (!bad && c->text != NULL) {
             print_to_capture(formula);
-            if (cap_over)
+            if (capture_over())
                 no(c->what, "the formula did not fit in %d characters", GB_LINE_MAX);
-            else if (strcmp(cap_buf, c->text) != 0)
+            else if (strcmp(capture_text(), c->text) != 0)
                 no(c->what, "said\n         %s\n         wanted\n         %s",
-                   cap_buf, c->text);
+                   capture_text(), c->text);
         }
 
         /* 2. The round trip: the machine's own reader, on the machine's own
@@ -1007,7 +926,7 @@ static int selftest(void)
             const char *rwhy = "";
 
             print_to_capture(formula);
-            if (gb_parse(cap_buf, (u64)cap_len, &back, &rwhy) != GB_PARSE_OK)
+            if (gb_parse(capture_text(), (u64)capture_len(), &back, &rwhy) != GB_PARSE_OK)
                 no(c->what, "the reader refused the printed form: %s", rwhy);
             else if (!noun_equal(back, formula))
                 no(c->what, "the reader read the printed form as a different noun");
@@ -1025,7 +944,7 @@ static int selftest(void)
                 no(c->what, "the interpreter did not answer: %s", machine_err_msg);
             else if (!noun_equal(answer, want)) {
                 print_to_capture(answer);
-                no(c->what, "answered %s, wanted %s", cap_buf, c->answer);
+                no(c->what, "answered %s, wanted %s", capture_text(), c->answer);
             }
         }
 
@@ -1106,7 +1025,7 @@ int main(int argc, char **argv)
                 GB_LINE_MAX);
         return 1;
     }
-    memcpy(text, cap_buf, cap_len + 1);
+    memcpy(text, capture_text(), capture_len() + 1);
     fputs(text, stdout);
     fputc('\n', stdout);
     return 0;

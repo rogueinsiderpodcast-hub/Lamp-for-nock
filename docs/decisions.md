@@ -291,13 +291,42 @@ choice, it is a way of lying to the user about what the machine computed.
 
 **Proven:** yes, at the C level, including every crash case.
 
-**Not proven:** that any of these twenty is *equivalent to a Nock formula*. In
-Urbit these are jets: each has a Nock definition in the standard library, and a
-jet is only legitimate because it computes the same thing its Nock definition
-computes. Step 1 has no Hoon compiler and no standard library, so there is no
-Nock definition to compare against. Proving that equivalence, against the real
-formulas, is the first job of the next step. Until then they are a tested native
-bank, not proven jets.
+**Proved against a Nock definition:** two of the twenty, and the other eighteen
+are now named and accounted for rather than quietly unproved.
+
+`+inc` is opcode 4 -- `[4 [[0 [2 0]] 0]]` -- and `+eq` is opcode 5 on two
+operands read out of the subject, `[5 [[0 [2 0]] [[0 [6 0]] 0]]]`. `make proofs`
+is where that is established: each definition is read by the machine's own
+reader, printed by the machine's own printer and required to come back
+byte-for-byte as the table spells it, then run by the machine's own interpreter
+against the native over 1,412 inputs -- the cross product of thirty interesting
+values plus a fixed 512-pair sweep -- and required to agree, *including* on which
+inputs stop. A native that answers where its definition would have stopped is
+the one way to make a wrong machine faster, so that is counted separately from
+the answers rather than inside them.
+
+**Not proven:** the other eighteen. The blocker is not arithmetic, it is that
+Nock has no loop. `+add` is a carry chain over 63 bits, the comparisons are bit
+scans, `+div` is a long division, and each of them has to iterate. Iterating in
+Nock means a core that calls its own arm, which means a noun that contains
+itself, and the notation for that in Hoon is a *name*: `=+(a b)`, where `a` names
+the arm being written. Lamp's language has no names, so it cannot write a core
+that refers to itself, so it cannot write a definition that iterates. Unrolling
+63 steps would be longer than a line of input and would prove nothing a loop does
+not. So the first job of the next step is names, not proofs -- and this is the
+one piece of evidence for that claim worth keeping: the two primitives that
+*are* proved are exactly the two whose Nock definition is a single opcode and no
+iteration.
+
+**What the battery is and is not,** since a suite that oversells itself is worse
+than none: for both proved primitives the rule that gives the definition is one
+line of the specification, and the equivalence is settled by setting that rule
+beside the two lines of C implementing it. 1,412 inputs cannot establish it. They
+are there to catch the day somebody edits a native to be cleverer than the opcode
+it stands for, and they were checked by deliberately breaking the natives six
+ways -- a wrong answer, a crash one input short of the ceiling, a crash where
+the definition answers, a flipped comparison convention, a primitive nobody had
+accounted for, and a misspelt name in the table. All six are caught.
 
 ---
 
@@ -328,7 +357,10 @@ works end to end, and it is labelled as ours everywhere it appears.
 **Proven:** the mechanism. A jet fires, a native function runs, and the
 evaluation's answer is bit-for-bit the same with hooks enabled and disabled.
 
-**Not proven:** equivalence to any Nock definition — see item 9.
+**Not proven:** that the jet mechanism can stand in for a *standard library*
+definition. Two of the twenty primitives now have Nock definitions and are proved
+against them (`make proofs`); the other eighteen cannot be written down until the
+language has names, because a loop is a name. See item 9.
 
 ---
 
