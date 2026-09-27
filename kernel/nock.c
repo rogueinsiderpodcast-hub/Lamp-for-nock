@@ -16,7 +16,7 @@
  *     [5 b c]         0 if the two products are the same noun, else 1
  *     [6 b c d]       if b then c else d  (0 is true, 1 is false)
  *     [7 b c]         nock(nock(subject, b), c)          -- c is not evaluated
- *     [8 b c]         nock([nock(subject, b) subject], nock(subject, c))
+ *     [8 b c]         nock([nock(subject, b) subject], c)
  *     [9 b c]         d = nock(subject, c); nock(d, slot(d, b))
  *     [10 [b c] d]    #[b nock(subject, c) nock(subject, d)]
  *     [11 b c]        nock(subject, c), with b as a discarded hint
@@ -113,6 +113,7 @@ static noun arg(noun f, int i)
             return 0;
         }
         t = noun_tail(t);
+        i--;
     }
     if (!noun_is_cell(t)) {
         machine_crash("formula is missing arguments");
@@ -290,8 +291,13 @@ static noun nock(noun subject, noun formula)
     case 8:  /* push: evaluate the first argument onto the front of the subject */
     {
         noun b = nock(subject, arg(formula, 0));
-        noun fml = nock(subject, arg(formula, 1));
-        result = nock(noun_cons(b, subject), fml);
+        if (machine_err)
+            break;
+        /* The rule is *[[*[a b] a] c]: the new subject is b's product pushed
+         * onto a, and the second argument is the formula to run there.  It is
+         * not evaluated first.  That is the difference from opcode 2, whose
+         * rule is *[*[a b] *[a c]] and which does evaluate c. */
+        result = nock(noun_cons(b, subject), arg(formula, 1));
         break;
     }
 

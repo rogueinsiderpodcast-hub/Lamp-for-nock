@@ -57,7 +57,7 @@ project.
 ## 3. No inherited drivers, no operating system underneath
 
 **Decided:** freestanding C. `-ffreestanding -nostdlib`. No libc. The kernel
-image is loaded by QEMU's multiboot loader and the boot code zeroes its own
+image is loaded by QEMU's PVH loader and the boot code zeroes its own
 `.bss` and builds its own stack. The only memory the C code ever sees is what
 QEMU's memory map says is available.
 
@@ -75,22 +75,59 @@ mechanical version of "nothing came from outside".
 
 ---
 
-## 4. Multiboot 2 rather than Multiboot 1
+## 4. PVH, and only the memory map
 
-**Decided:** Multiboot 2, memory map tag only.
+**Decided:** the PVH interface, for the memory map and nothing else. QEMU loads
+`build/boot.elf`, finds the entry point in the `.note.Xen` note, and jumps to it
+in 32-bit protected mode with a physical address in `%ebx` pointing at an
+`hvm_start_info` structure. That structure is where the memory map lives.
 
-**Why:** Multiboot 1's memory map entries are structs with compiler-dependent
-padding, and the size field is ambiguous about how much padding is included.
-Multiboot 2's tags are fixed-size and self-describing: 8 bytes of tag header,
-then 24 bytes per map entry. The fields are read one byte at a time, so there
-is nothing left to a compiler's idea of alignment.
+**Why:** PVH is the interface between a hypervisor and a guest it is loading
+directly, which is exactly the relationship here. QEMU is not standing in for a
+bootloader, there is no bootloader, and nothing in the machine will ever be
+started by a bootloader, so Multiboot's tags — modules, a command line, a
+framebuffer, an ACPI table pointer — are surface area for features that cannot
+exist here. The whole of what we take is a struct in a register and a list of
+fixed-size map entries.
 
-**Cost:** a tag-walking loop, about 40 lines. Multiboot 1 would have been
-shorter and would have been a latent bug.
+**Why this is also the simple one:** the entry point is four words in an ELF
+note, and the handover is a single structure. There is no header to get right
+and no tag list to walk: the map is a pointer plus a count, and that is it.
 
-**Not proven:** only that QEMU's map parses. Nothing depends on the rest of the
-multiboot interface, and nothing ever will: the machine has no modules, no
-console, no framebuffer and no command line.
+**Cost:** about 30 lines of offset arithmetic. The structures are read field by
+field at fixed offsets rather than by casting to a C struct. The layout happens
+to be padding-free so a struct would come out the same, but offsets say what
+they mean and cannot drift if the compiler or the word size changes.
+
+**Not proven:** only that the map parses and the heap lands above the kernel.
+Nothing else in the PVH interface is used, and nothing else ever will be. The
+machine has no modules, no console, no framebuffer and no command line to
+receive.
+
+---
+
+## 4a. Superseded: Multiboot 2 rather than Multiboot 1
+
+The first version of this machine booted through Multiboot 2, and the reasoning
+for choosing it over Multiboot 1 is kept here because it was right and because
+the comparison against the PVH map is what made the switch obvious:
+
+> **Decided (superseded):** Multiboot 2, memory map tag only.
+>
+> **Why:** Multiboot 1's memory map entries are structs with compiler-dependent
+> padding, and the size field is ambiguous about how much padding is included.
+> Multiboot 2's tags are fixed-size and self-describing: 8 bytes of tag header,
+> then 24 bytes per map entry. The fields are read one byte at a time, so there
+> is nothing left to a compiler's idea of alignment.
+>
+> **Cost:** a tag-walking loop, about 40 lines. Multiboot 1 would have been
+> shorter and would have been a latent bug.
+
+What the switch exposed: both Multiboot versions are interfaces between a guest
+and a *bootloader*, and this machine has no bootloader. The tag-walking loop was
+buying alignment safety that PVH gives for free, and paying for it with a
+layer of indirection — a tag list to find the map inside — that a hypervisor
+interface does not have at all, because there the map is a field.
 
 ---
 
@@ -192,12 +229,32 @@ identical-looking shapes and opposite behaviour: with a second argument of
 `5`, discovers a formula must be a cell, and crashes. The test suite pins both
 halves of that pair down.
 
+Opcode 8 is the same trap wearing a different hat, and it is the one that was
+actually got wrong while this machine was being written. `b` is evaluated and
+`c` is *used as the formula*, so the two arguments are both formulas but in
+different positions — the same word in the table covers two different mechanisms.
+Evaluating `c` and then running its product is the opcode-2 reading, and it is
+wrong here. The bug was found only by checking the implementation against the
+spec line, not by reading the test that exercises it.
+
 **Evidence:** the rule `*[a 0 b] = /[b a]` uses `b` directly, and opcode 11's
 own expansion is written `[... 0 3]`, both of which are only meaningful if
-address 0's argument is a literal. docs.urbit.org and `vere/doc/spec/nock/4.txt`
-agree. Same reasoning for opcode 9's address.
+address 0's argument is a literal. Same reasoning for opcode 9's address. The
+three that matter most, from `vere/doc/spec/nock/4.txt`:
+
+```
+*[a 2 b c]  *[*[a b] *[a c]]      both arguments reduced, product of c is the formula
+*[a 7 b c]  *[*[a b] c]           b reduced, c itself is the formula
+*[a 8 b c]  *[[*[a b] a] c]       b reduced, c itself is the formula
+```
+
+Note that 2 differs from 7 and 8 only in the last step, and that is the entire
+2-against-7 distinction: what happens to `c`.
 
 **Proven:** the test suite, against both readings of the argument convention.
+The opcode-2 success case pins down that `c`'s *product* is the formula (it is
+given a constant formula and answers through it), and the 2-against-7 pair pins
+down the other half.
 
 ---
 

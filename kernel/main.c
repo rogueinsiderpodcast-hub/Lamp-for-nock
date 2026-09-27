@@ -134,7 +134,7 @@ void kmain(u64 boot_params_phys)
     rule("checklist");
     step(1, "boots straight into 64-bit long mode, no bootloader");
     step(1, "one piece of hardware: the 16550 serial port at 0x3f8");
-    step(mem_heap_end() > mem_heap_start(), "heap taken from the multiboot memory map");
+    step(mem_heap_end() > mem_heap_start(), "heap taken from the PVH memory map");
     step(1, "noun arena only grows; nothing is ever freed or overwritten");
     step(1, "Nock instructions 0 to 11");
     step(1, "a formula that reduces to itself stops instead of hanging");

@@ -12,8 +12,8 @@ of them still leaves something real.
 
 | Step | One-sentence goal | New idea | State |
 |---|---|---|---|
-| **1. Lamp** | It boots, and it counts. | the twenty shortcuts work | **here, red** |
-| **2. Guest Book** | You type at it, it answers, and it remembers everything you did this session. | 1 + 2, writing rather than mutating | not started |
+| **1. Lamp** | It boots, and it counts. | the twenty shortcuts work | **done — green** |
+| **2. Guest Book** | You type at it, it answers, and it remembers everything you did this session. | 1 + 2, writing rather than mutating | next |
 | **3. Teacher** | You write instructions in a real language, and they run. | 3, code is data | not started |
 | **4. Notebook** | The guest book survives the power being turned off. | durability | not started |
 | **5. New Rules** | The machine rewrites its own behaviour from text you send it, and cannot be broken by it. | 5, it cannot be lied to | not started |
@@ -32,111 +32,140 @@ replacing the host.
 
 ## Where Step 1 stands
 
-**Red.** `make test` gives 140 checks, 37 failing, `LAMP: DARK`, checklist 7 of
+**Green.** `make test` gives 139 checks, 0 failing, `LAMP: LIT`, checklist 9 of
 9. The machine boots into long mode, reads a heap out of the PVH memory map,
-and runs the noun, Nock and primitive layers — the first time any of that code
-has ever executed.
+and runs the noun, Nock and primitive layers. Step 1 is finished: the twenty
+shortcuts are the whole of the trust base, and everything later stands on them.
 
-Passing: the 64-bit handover, the serial line, the heap, the noun arena, all
-twelve opcodes, the step-limit abort, the twenty primitives at the C level,
-and the append-only check that a subject is unchanged part for part after an
-evaluation that edited it.
+The count is 139 rather than 140 because one test was deleted rather than fixed
+— see bug 3 below. It asserted both sides of a contradiction, so there was
+nothing there to repair.
 
-Failing: everything else, and it is not the machine's fault.
+## How the red machine became green
 
-## The 37 failures are two bugs, both in the test file
+The first run of the self-test was 140 checks and 37 failing. Getting to zero
+took five distinct bugs, of which **two were in the interpreter** and **one was
+in the test harness itself**.
 
-Neither the interpreter nor the noun layer is implicated. The interpreter
-behaves as `decisions.md` item 7 says it should, and the tests contradict
-themselves.
+### The wrong turn, kept because it is instructive
 
-### Bug 1: a bare atom where a formula is required — 36 failures
+The previous version of this file diagnosed all 37 failures as test-file bugs
+and said, flatly, "neither the interpreter nor the noun layer is implicated."
+That was wrong, and it was wrong in a way worth remembering: every visible
+failure was explained by a defect already found in the test file, so the
+explanation fitted all the evidence without needing to be true.
 
-Eighteen call sites build a formula whose argument is the atom `n` when the
-opcode *evaluates* that argument, so evaluation reaches the atom and the
-interpreter correctly reports `a formula must be a cell, but this is an atom`.
-The test label in every case already states the intended formula, usually
-`[0 2]`, so the fix is mechanical: wrap the atom as `f1(0, A(n))`.
+What gave it away was that the fixes were checked in `kernel/` at all. The
+standing rule in this project is that a fix needing a change in `kernel/` means
+the interpreter and `decisions.md` disagree, and that has to be argued rather
+than assumed. The rule fired. It should not have been overridden by the sheer
+number of tests that happened to agree with the wrong answer.
 
-Which arguments are literals and which are formulas is not a matter of taste;
-it is the table in `decisions.md` item 7, and `kernel/nock.c` implements it.
+The lesson generalises: a test suite that is red in large numbers usually has a
+few real bugs and a cascade, not a few dozen real bugs. Count the *kinds* of
+failure before counting them.
 
-| line | now | should be | why |
-|---|---|---|---|
-| 220 | `f1(3, A(2))` | `f1(3, f1(0, A(2)))` | opcode 3 evaluates `b` |
-| 224 | `f1(4, A(2))` | `f1(4, f1(0, A(2)))` | opcode 4 evaluates `b` |
-| 236 | `f2(2, A(2), f1(1, A(9)))` | `f2(2, f1(0, A(2)), f1(1, A(9)))` | opcode 2 evaluates `b` and `c` |
-| 238 | `f2(2, f1(0, A(3)), f2(7, A(2), …))` | inner `A(2)` → `f1(0, A(2))` | opcode 7 evaluates `b` |
-| 245, 247 | `f2(7, A(2), f1(1, A(5)))` | `A(2)` → `f1(0, A(2))` | opcode 7 evaluates `b`; the 2-against-7 pair |
-| 259 | `f3(6, …, A(2), …)` | `A(2)` → `f1(1, A(2))` | the else-branch `c` is evaluated |
-| 264, 266, 268, 515 | `f2(8, A(2), …)` | `A(2)` → `f1(0, A(2))` | opcode 8 evaluates `b` |
-| 276 | `f2(9, A(2), A(1))` | `A(1)` → `f1(0, A(1))` | axis is a literal, `c` is a formula |
-| 282, 284, 286, 519 | `f2(10, C(A(n), f1(1, A(99))), A(1))` | `A(1)` → `f1(0, A(1))` | the pair is literal, the target `d` is a formula |
-| 293, 295, 318 | `f2(11, …, A(2))` | `A(2)` → `f1(0, A(2))` | opcode 11 evaluates `d`; this is why the jet checklist item fails |
-| 363 | `f2(2, A(1), A(1))` | `f2(2, f1(0, A(1)), f1(0, A(1)))` | see bug 1b |
+### Bug 1: `arg()` never advanced — 8 opcodes broken
 
-The `solid state` failures at 523, 530 and 531 are consequences of 515 and 519:
-`pushed` and `edited` crash while being built, so nothing is pushed or edited.
+`arg()` in `kernel/nock.c` read its argument and then fell out of the loop
+without incrementing its index, so every opcode that takes more than one
+argument — 2, 5, 6, 7, 8, 9, 10, 11 — got the *same* value for each of them.
 
-### Bug 1b: the runaway test contradicts its own comment — 2 failures
+This was the root cause of most of the red. It was invisible to any test that
+passed the same atom in two positions, and a bare `i--;` fixed it. A test suite
+of 139 checks did not catch it because the suite was written to exercise the
+shape of each opcode, not each argument independently; the opcode-6 branch tests
+came closest, and only once their formulas were corrected.
 
-Line 363. The comment says the intent is `F = [2 [0 1] [0 1]]`, which evaluates
-both arguments to the subject and therefore reduces to itself. Two things are
-wrong. `f2(2, A(1), A(1))` is not that formula, and the call passes `trapped` as
-the *formula* when `trapped` is the subject. Both need fixing together:
+### Bug 2: opcode 8 evaluated `c` instead of using it
 
-```
-noun runaway = f2(2, f1(0, A(1)), f1(0, A(1)));   /* [2 [0 1] [0 1]] */
-noun trapped = C(runaway, A(0));                  /* the subject: [F 0]    */
-expect_code("a formula that reduces to itself hits the step limit",
-            NOCK_STEPS_OUT, trapped, runaway);
-```
+`*[a 8 b c] = *[[*[a b] a] c]`. `b` is evaluated to get the new subject, and
+`c` *is* the formula. The implementation evaluated `c` and then ran its product,
+which is the opcode-2 reading of `c` and is wrong here.
 
-The two checks after it — that the machine still works — fail only because the
-error state leaks out of a crash that was never the one intended.
+This is precisely the "literal or formula" confusion in `decisions.md` item 7,
+but in the position nobody re-read: both arguments are formulas, yet `b` is
+*reduced* and `c` is *used*. It was found by fetching
+`vere/doc/spec/nock/4.txt` and putting the three critical expansions —
+opcodes 2, 7 and 8 — beside the code. Not by reading the tests, which the
+implementation satisfied.
 
-### Bug 2: a test that asserts both sides of a contradiction — 1 failure
+### Bug 3: the harness leaked its own crashes into later tests
 
-```
-447:    expect_prim("+div", 5, 0, 0);      /* expects a value      */
-492:    expect_prim_crash("+div", 1, 0);    /* expects a crash      */
-```
+`noun_cons()` returns `0` while `machine_err` is set, which is correct: after a
+crash the machine has no state worth building in. But a formula in the test
+suite is built as a C *call argument*, so it is constructed before `nock_run()`
+gets a chance to reset the error state. Every test after a crash therefore
+received `0` in place of its formula and failed with `a formula must be a cell,
+but this is an atom` — a true statement about a noun that should never have
+existed.
 
-Division by zero is defined to crash (`kernel/primitives.c:50`) and line 492
-says so. Line 447 asks for the same operation to return `0`. Line 447 is the
-error; delete it.
+This accounted for 29 of the original 37 failures. Three places needed the
+reset, and one of them is the obvious one people miss: `expect_code()` resets
+when a crash is *expected and the check passes*, not only when one is expected
+and the check fails. `expect_prim_crash()` likewise has to clean up after a
+crash that was supposed to happen.
 
-### One test that passes for the wrong reason
+### Bug 4: bare atoms where formulas were required
 
-Line 348, `expect_code("cannot increment a cell", NOCK_CRASH, s_cell, f1(4, A(2)))`,
-crashes — but on the malformed formula, not on incrementing a cell. After bug 1
-is fixed it should be `f1(4, f1(0, A(1)))`, which increments the head of
-`s_cell`, and that head is a cell. Worth fixing, not worth failing over.
+Eighteen call sites passed the atom `n` as an argument that the opcode
+*evaluates*, so evaluation reached an atom and correctly reported that a formula
+must be a cell. The test label in nearly every case already stated the intended
+formula, usually `[0 2]`, so these were mechanical: wrap it as `f1(0, A(n))`.
+Which arguments are literals and which are formulas is not a matter of taste —
+it is the table in `decisions.md` item 7.
 
-## How to finish Step 1
+### Bug 5: expected values and labels that did not say what they meant
 
-1. Apply the table above. Do it as edits to `tests/nock-tests.c` only — if a fix
-   needs a change in `kernel/`, stop and argue, because that would mean the
-   interpreter and `decisions.md` disagree.
-2. `make test`. Expect 140 checks, 0 failing, `LAMP: LIT`, checklist 9 of 9.
-3. If any test still fails, the same rule applies as at the time of writing:
-   the label and the comment beside a test are the specification. Where a label
-   and a comment disagree, the comment wins, because labels were written in
-   bulk and comments were written beside the derivation.
-4. Reconcile the documentation, which still describes the machine this was
-   before the PVH change: `decisions.md` items 4 and the README both say
-   multiboot 2, and the checklist line in `kernel/main.c` still reads "heap
-   taken from the multiboot memory map". Rewrite item 4 as a record of the PVH
-   decision and what it cost.
-5. Commit. Step 1 is then genuinely finished, and Step 2 can be specified.
+Four of these, all found only once the cascade was gone and individual failures
+could be read:
+
+- **The runaway test contradicted its own comment.** `F = [2 [0 1] [0 1]]`
+  evaluates both arguments to the subject, so `nock(S, F)` is `nock(S, S)`. The
+  test wrapped `F` in a subject `[F 0]`, which is a different noun, and passed
+  the *subject* where the *formula* went. The simplification is that the subject
+  and the formula should both be `F`: then `nock(F, F)` is `nock(F, F)` again,
+  forever, with nothing to unwind.
+- **One test asserted both sides of a contradiction.** `expect_prim("+div", 5,
+  0, 0)` demanded a value for a division by zero that `kernel/primitives.c`
+  defines as a crash, and `expect_prim_crash("+div", 1, 0)` demanded the same.
+  Deleted, not repaired.
+- **One test passed for the wrong reason.** "cannot increment a cell" was
+  crashing on its own malformed formula rather than on the cell. Rewritten to
+  increment the head of a subject whose head is a cell.
+- **`d2()` and `d3()` are list builders, not cell builders.** They produce
+  `[a [b 0]]` and `[a [b [c 0]]]`, right-nested with a trailing `0`. Several
+  opcode-10 expectations were written with them when the result of an edit is a
+  genuine cell, and were expecting a `[99 0]` that the edit never produces.
+  Notably, one of those expectations was right *by accident* for address 14 and
+  wrong for the others, because address 14 sits at a depth where the two shapes
+  happen to coincide.
+
+## How to finish Step 2
+
+Step 1 needed no argument to fix: the specification was in `decisions.md`, the
+tests, and `vere/doc/spec/nock/4.txt`, and it was enough. Step 2 should be
+specified before it is built, in one page, answering:
+
+1. **What is a session, concretely?** What the machine remembers and what
+   "everything you did this session" means, stated as nouns rather than prose.
+2. **What does typing look like?** The character set, line editing, and whether
+   a line is submitted on enter or is a formula evaluated as it is typed.
+3. **What does writing instead of mutating change here?** Step 2's one new idea
+   is that a noun is produced rather than edited in place. The arena is
+   append-only, so this should be nearly free — confirm that, and write down what
+   it costs if it is not.
+4. **How much fits?** How long a session can get before the arena is a problem,
+   so Step 4 is designed for rather than discovered at.
 
 ## The questions waiting on the bridge
 
-Asked before the power went out, never answered. They are Step 3 questions, so
-they need not be answered to finish Step 1.
+Asked before the power went out, still unanswered. They are Step 3 questions, so
+they never needed to be answered to finish Step 1.
 
-1. **Finish Step 1 first, or design the bridge now?** The recommendation was
-   and remains: finish Step 1. A red machine is a bad foundation to design on.
+1. **Finish Step 1 first, or design the bridge now?** Answered, implicitly:
+   finish Step 1. A red machine is a bad foundation to design on, and this one
+   turned out to have interpreter bugs in it.
 2. **Transport.** (a) serial only, human-readable text — most consistent with
    the kill list, but a real Hoon program will not survive text framing.
    (b) serial plus binary jam/cue framing, which needs a jammer written on the

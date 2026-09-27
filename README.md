@@ -16,13 +16,13 @@ $ make test
 
 ## What it is
 
-A 64-bit x86 program loaded straight into long mode by QEMU's multiboot loader.
+A 64-bit x86 program loaded straight into long mode by QEMU's PVH loader.
 No operating system, no libc, no bootloader, no disk, no network. The only piece
 of hardware it touches is the 16550 serial port at 0x3f8, polled, one byte at a
 time.
 
-The whole machine is 1,399 lines, counting code but not comments or blank
-lines: 115 of assembly to reach long mode, 898 of C, and 386 of tests. It
+The whole machine is 1,475 lines, counting code but not comments or blank
+lines: 133 of assembly to reach long mode, 946 of C, and 396 of tests. It
 implements Nock 4K — all twelve opcodes — over a noun representation where
 atoms are 63-bit numbers and cells point into an arena that only ever grows, so
 the state of the machine is a log and its history is everything it has already
@@ -49,11 +49,11 @@ because there is no host-side machine to test.
 ## Layout
 
 ```
-boot/boot.S        multiboot 2 header, 32-bit -> 64-bit, stack, .bss zeroing
+boot/boot.S        PVH entry, 32-bit -> 64-bit, stack, .bss zeroing
 boot/link.ld       one load segment at 0x100000
 kernel/kernel.h    the only header
 kernel/serial.c    polled 16550 UART
-kernel/memory.c    multiboot 2 memory map, bump allocator
+kernel/memory.c    PVH memory map, bump allocator
 kernel/noun.c      nouns, slot, edit, structural equality
 kernel/nock.c      the interpreter
 kernel/primitives.c  the twenty native primitives

@@ -2,7 +2,7 @@
  *
  * Freestanding C.  No libc, no host headers, no operating system.  The only
  * hardware this machine talks to is the 16550 serial UART, and the only
- * memory it uses is what QEMU's multiboot memory map hands us.
+ * memory it uses is what QEMU's PVH memory map hands us.
  */
 
 #ifndef KERNEL_H
