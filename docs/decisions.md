@@ -502,6 +502,12 @@ one per character at worst) and `GB_PARSE_MAX_DEPTH` (32 open brackets). Both
 are refused with a reason rather than run off the end. A formula is not a thing
 a person types with 32 brackets, and a 129-character line is not either.
 
+Those two numbers were sized for the only writer there was, a person, and item
+21 is what moved them: a compiler writes these lines now, so the limits are the
+compiler's. The reasoning above is unchanged by that, and the cost is unchanged
+too -- still one noun per item on the stack, still refused by name. Only the
+number that was a guess about people turned out to be a real ceiling.
+
 ---
 
 ## 18. The machine's verdict is QEMU's exit status
@@ -579,3 +585,32 @@ needs, so the test lowers it for one line and hands it back. A real session that
 runs out of steps is therefore only reachable by a formula built in C, which is
 a Step 3 question. The step limit itself is not a property of the book: it is
 the interpreter's, and it was tested there first.
+
+---
+
+## 21. The bridge is the reader, and the reader's limits were a person's limits
+
+**Decided:** a host program compiles Hoon into a Nock formula and writes it to
+the guest as bracket text, which the guest's existing parser reads and the book
+runs. No protocol, no new guest code, no framing, no socket. What did change is
+the reader's limits: the line went from 128 characters to 4096, the item
+ceiling from 128 to 4096, and the bracket depth from 32 to 256, with the
+parser's arrays left on the stack, which the 1MB one makes affordable.
+
+**Why:** this answers the transport question `state.md` had left open, and the
+answer is the option it had doubted. It doubted text framing on the grounds that
+"a real Hoon program will not survive it", which is true of the *length* and
+nothing else: a compiled core is a noun, and a noun is what the reader reads.
+The programme's own reply is to make the reader's job someone else's. The size
+is real and it is now a stated ceiling rather than a guess -- see the cost.
+
+**Cost:** 4096 characters is the whole budget, and a compiled expression spends
+it fast, because every atom and every axis in a Nock formula is spelled out in
+brackets. Anything larger needs the jammer the earlier question leaned towards,
+and the jammer is the honest next step rather than a bigger number: a limit
+raised again and again is a protocol being reinvented badly. A 4096-character
+line costs about 4100 noun cells out of 8,317,184, so the reader's ceiling is
+the binding constraint, not the machine's. The depth limit of 256 is the one
+that will bite first in practice, since every `=+` costs several levels. Until
+the jammer exists the ceiling is 4096 and the failure is a refusal by name
+rather than a scribble, which is what the limits have always been for.

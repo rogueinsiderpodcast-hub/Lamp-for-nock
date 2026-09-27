@@ -13,8 +13,8 @@ of them still leaves something real.
 | Step | One-sentence goal | New idea | State |
 |---|---|---|---|
 | **1. Lamp** | It boots, and it counts. | the twenty shortcuts work | **done — green** |
-| **2. Guest Book** | You type at it, it answers, and it remembers everything you did this session. | 1 + 2, writing rather than mutating | **in progress** |
-| **3. Teacher** | You write instructions in a real language, and they run. | 3, code is data | not started |
+| **2. Guest Book** | You type at it, it answers, and it remembers everything you did this session. | 1 + 2, writing rather than mutating | **done — green** |
+| **3. Teacher** | You write instructions in a real language, and they run. | 3, code is data | **started** |
 | **4. Notebook** | The guest book survives the power being turned off. | durability | not started |
 | **5. New Rules** | The machine rewrites its own behaviour from text you send it, and cannot be broken by it. | 5, it cannot be lied to | not started |
 | ~~Wire~~ | ~~Networking~~ | | deferred indefinitely |
@@ -143,7 +143,7 @@ could be read:
 
 ## Where Step 2 stands
 
-**Done.** The self-test is 226 checks, 0 failing, `LAMP: LIT`, checklist 11 of 11
+**Done.** The self-test is 228 checks, 0 failing, `LAMP: LIT`, checklist 11 of 11
 -- the eleventh being the new one, that a formula typed at the machine runs and
 what it leaves behind matters.  It was checked by breaking the count increment
 and watching the lamp go dark, because a checklist item that cannot fail is a
@@ -211,29 +211,43 @@ wrong.
    immutability here is that items have to be held until their order is known.
 4. **How much fits?** The arena is half the heap at 16 bytes a cell, and the
    machine now says so: 8,317,184 cells with QEMU's 256MB, 406 used by the
-   self-test. A line costs about 3 cells at one character and about 130 at a
-   full 128-character line, so a session runs to somewhere between tens of
+   self-test. A line costs about 3 cells at one character and about 4100 at a
+   full 4096-character line, so a session runs to somewhere between tens of
    thousands and a couple of million entries -- and when the arena is full,
    `noun_cons` crashes rather than reusing, which is Step 4's problem to solve
-   and not something to discover at.
+   and not something to discover at. The reader's line limit, not the arena, is
+   what a session of compiled formulas will run into first: at 4096 characters
+   it spends 4100 cells of 8,317,184, and the depth limit of 256 open brackets
+   is the one reached first in practice.
 
 ## The questions waiting on the bridge
 
-Asked before the power went out, still unanswered. They are Step 3 questions, so
-they never needed to be answered to finish Step 1.
+Asked before the power went out, when the bridge was still a question. All three
+are answered now, and the answers are in Step 3's own words below. They were
+Step 3 questions, so they never needed answering to finish Step 1 -- but leaving
+them open in the state file while the decision log had answered them is how a
+later reader ends up arguing with a decision that was already made.
 
 1. **Finish Step 1 first, or design the bridge now?** Answered, implicitly:
    finish Step 1. A red machine is a bad foundation to design on, and this one
    turned out to have interpreter bugs in it.
-2. **Transport.** (a) serial only, human-readable text — most consistent with
-   the kill list, but a real Hoon program will not survive text framing.
-   (b) serial plus binary jam/cue framing, which needs a jammer written on the
-   host. (c) QEMU `-serial unix:` socket with a host process, the guest side
-   still being only the UART. The leaning was (b).
-3. **Direction.** One-way — you type Hoon on the host, it compiles there, nouns
-   flow in, results come back over the serial line. Or two-way, where the guest
-   can also call out to the host, which is what running a real `vere` would
-   eventually need.
+2. **Transport.** Answered, in `decisions.md` item 21, and it is (a) — the
+   serial text the reader already reads, with no new protocol, no framing and no
+   new guest code. The doubt recorded here was that "a real Hoon program will
+   not survive text framing", which is true of the *length* and of nothing else:
+   a compiled core is a noun, and a noun is what the reader reads. The reply to
+   a length problem is to make the reader's job someone else's, so the limits
+   moved from a person's (128 characters, 32 open brackets) to a compiler's
+   (4096, 256), and they now live in `kernel.h` as part of the reader's
+   contract, with the tests building their inputs from the numbers rather than
+   hard-coding some that rot. (b) is not dismissed, it is next: a jammer is what
+   comes after the ceiling is reached, and a limit raised again and again is a
+   protocol reinvented badly. (c) is still out; a socket is a device.
+3. **Direction.** Answered: one-way, as the leaning said. Hoon is typed on the
+   host, compiled on the host, and the nouns flow in one at a time, with answers
+   coming back over the serial line. Two-way, where the guest can call out to the
+   host, is a real problem but it belongs to running a real `vere`, which is a
+   much later thing than this.
 
 ## The kill list, still in force
 

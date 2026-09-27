@@ -50,7 +50,7 @@ QEMU := qemu-system-x86_64 -machine pc -m 256 -no-reboot \
         -display none -serial stdio -monitor none \
         -device isa-debug-exit,iobase=0xf4,iosize=0x04
 
-.PHONY: all run test debug clean
+.PHONY: all run test debug clean lines
 
 all: $(KERNEL)
 
@@ -83,6 +83,24 @@ test: $(KERNEL)
 	    echo "make test: FAILED -- qemu exited with $$status (expected 1 or 3)"; \
 	    cat $(BUILD)/test.log; exit 1; \
 	fi
+
+# The README carries a line count, and the README says the count is reproducible
+# or it is not worth carrying -- so here is the method as something to run rather
+# than a claim to trust.  tools/lines.awk is awk rather than a shell one-liner
+# because a /* comment can open on one line and close on another, and any
+# per-line filter gets that wrong.
+#
+# The counts are the machine and nothing else: assembly, the C, the tests, and
+# the headers they share.  No Makefile, no docs, because a line of prose about
+# the machine is not part of the machine.
+lines:
+	@printf 'assembly      %5d\n' "$$(awk -f tools/lines.awk boot/boot.S)"
+	@printf 'kernel C      %5d\n' "$$(cat kernel/*.c | awk -f tools/lines.awk)"
+	@printf 'tests         %5d\n' "$$(cat tests/*.c | awk -f tools/lines.awk)"
+	@printf 'headers       %5d\n' "$$(cat kernel/*.h tests/*.h | awk -f tools/lines.awk)"
+	@printf 'total         %5d\n' \
+	    "$$(cat boot/boot.S kernel/*.c kernel/*.h tests/*.c tests/*.h \
+	        | awk -f tools/lines.awk)"
 
 debug: $(KERNEL)
 	qemu-system-x86_64 -machine pc -m 256 -no-reboot \

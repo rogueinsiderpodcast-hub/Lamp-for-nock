@@ -55,23 +55,33 @@
  * a noun built out of nouns, and that is not a contradiction of anything: a
  * frame is a local of the parser, not part of the session.  What the session
  * *is* is a noun; where the parser keeps its scratch while it works that out is
- * its own business, and a 128-character line is a fixed amount of stack whether
- * or not anyone has typed it yet.
+ * its own business, and a line of any permitted length is a fixed amount of
+ * stack whether or not anyone has typed it yet.
  *
- * The two limits below are real and both are checked.  A formula a person types
- * is nowhere near 32 open brackets, and a line is nowhere near 129 characters --
- * but a machine that reads text off a wire has to say so rather than walk off
- * the end of an array, and the first version of this file would have.
- */
-
-/* 32 open brackets.  A 128-character line can nest 64 deep, so this is a limit
- * a long enough line can reach, and it is refused by name. */
-#define GB_PARSE_MAX_DEPTH 32
-
-/* One item needs at least one character, so a line cannot hold more items than
- * it has characters.  Both limits are fixed so the parser is a noun array and a
- * frame array on the stack, with no allocation and nothing to free. */
-#define GB_PARSE_MAX_ITEMS 128
+ * The reader's limits live in kernel.h, because they are its contract rather
+ * than its business: the host compiler has to know the budget it is compiling
+ * into, and the tests build their inputs from the numbers instead of hard-coding
+ * some that rot.
+ *
+ * What the three mean, and why each is checked rather than trusted:
+ *
+ *   GB_LINE_MAX         the most characters one line may hold
+ *   GB_PARSE_MAX_DEPTH  the most open brackets open at once
+ *   GB_PARSE_MAX_ITEMS  the most items in one line
+ *
+ * They were sized for a person typing -- 128 characters and 32 brackets was
+ * generous against that, because nobody types a formula a page long by hand --
+ * and a compiler now writes these lines, which is the only reason they moved.
+ * Every atom in a Nock formula is spelled out in brackets, so a two-term
+ * expression costs more characters than it does terms, and a compiled expression
+ * spends a page quickly.
+ *
+ * The items array is one noun per item and the frame array is one frame per open
+ * bracket, both on the stack, with no allocation and nothing to free: 32KB and
+ * 4KB, which the 1MB stack in boot.S is there for.  GB_PARSE_MAX_ITEMS cannot be
+ * smaller than GB_LINE_MAX, because one item needs at least one character, so a
+ * line of N characters cannot hold more than N items.  That is the invariant the
+ * length check below rests on, and it is why the check is a check on length. */
 
 /* One open bracket: where its items start in items[], and how many it has. */
 struct gb_frame {
@@ -225,7 +235,6 @@ int gb_parse(const char *text, u64 len, noun *out, const char **why)
  * buffer is a compile-time constant and not an allocation.  Overflowing it
  * drops characters at the end rather than refusing the line: a line too long
  * to hold is a line the typist can see was truncated. */
-#define GB_LINE_MAX 128
 
 /* Ctrl-D leaves.  On a real terminal this is what end-of-file looks like from
  * the far end of a serial line, and it is the only way out, so that

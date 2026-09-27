@@ -225,32 +225,70 @@ static void test_refusals(void)
     parse_fails("a comma between numbers is refused", "1, 2",
                 "expected a digit, a space, [ or ]");
 
-    /* The depth limit, tested rather than assumed.  40 brackets against 32
-     * frames, so the limit is what refuses it and not the bracket balance. */
+    /* The depth limit, tested rather than assumed.  The inputs are built from
+     * GB_PARSE_MAX_DEPTH rather than written down, because a test that hard-codes
+     * 32 and 40 is a test that rots the moment a limit moves -- and these limits
+     * have already moved once, when a compiler started writing these lines
+     * instead of a person.  A test that has to be edited when the thing it tests
+     * changes is a test that stops being run. */
     {
-        char deep[2 * 40 + 3];
-        for (int i = 0; i < 40; i++)
+        /* The parser refuses to open its last frame, so the deepest line it reads
+         * is one bracket inside the limit, and the shallowest it refuses is the
+         * limit itself.  Both are checked, so the limit is where it is claimed. */
+        char deep[2 * GB_PARSE_MAX_DEPTH + 3];
+        char ok[2 * GB_PARSE_MAX_DEPTH + 3];
+        for (int i = 0; i < GB_PARSE_MAX_DEPTH; i++)
             deep[i] = '[';
-        deep[40] = '1';
-        for (int i = 41; i < 81; i++)
+        deep[GB_PARSE_MAX_DEPTH] = '1';
+        for (int i = GB_PARSE_MAX_DEPTH + 1; i < 2 * GB_PARSE_MAX_DEPTH + 1; i++)
             deep[i] = ']';
-        deep[81] = '\0';
+        deep[2 * GB_PARSE_MAX_DEPTH + 1] = '\0';
         parse_fails("more brackets than there are frames is refused", deep,
                     "too many [ in one line");
-    }
-    /* Just inside the limit, to show the limit is where it is. */
-    {
-        char ok[2 * 31 + 3];
-        for (int i = 0; i < 31; i++)
+
+        for (int i = 0; i < GB_PARSE_MAX_DEPTH - 1; i++)
             ok[i] = '[';
-        ok[31] = '1';
-        for (int i = 32; i < 63; i++)
+        ok[GB_PARSE_MAX_DEPTH - 1] = '1';
+        for (int i = GB_PARSE_MAX_DEPTH; i < 2 * GB_PARSE_MAX_DEPTH - 1; i++)
             ok[i] = ']';
-        ok[63] = '\0';
+        ok[2 * GB_PARSE_MAX_DEPTH - 1] = '\0';
         noun out2 = 0;
         const char *why2 = "";
-        expect_true("31 brackets are still inside the limit",
+        expect_true("one bracket inside the limit is still inside the limit",
                     gb_parse(ok, slen(ok), &out2, &why2) == GB_PARSE_OK);
+    }
+
+    /* The line limit, on the same terms: a line as long as the limit allows is
+     * read, and one character more is refused by name.  This is the limit the
+     * host compiler will hit first, since every atom it emits is spelled out in
+     * brackets, so it is the one worth having a test for.
+     *
+     * The long line here is a short formula followed by spaces, which shows what
+     * the limit counts: characters, not items.  A line of GB_PARSE_MAX_ITEMS
+     * characters cannot hold more than GB_PARSE_MAX_ITEMS items, because an item
+     * needs a character to be written with, and that is the invariant the
+     * parser's check rests on. */
+    {
+        char full[GB_PARSE_MAX_ITEMS + 1];
+        char over[GB_PARSE_MAX_ITEMS + 2];
+        for (u64 i = 0; i < GB_PARSE_MAX_ITEMS; i++)
+            full[i] = ' ';
+        /* "[1 2]" at the front of a line of spaces, written out because the test
+         * suite has no string library to reach for: the guest has memcpy, but no
+         * declaration of it, and a test is not the place to add one. */
+        full[0] = '['; full[1] = '1'; full[2] = ' '; full[3] = '2'; full[4] = ']';
+        full[GB_PARSE_MAX_ITEMS] = '\0';
+        noun out3 = 0;
+        const char *why3 = "";
+        expect_true("a line as long as the limit allows is read",
+                    gb_parse(full, slen(full), &out3, &why3) == GB_PARSE_OK);
+
+        for (u64 i = 0; i < GB_PARSE_MAX_ITEMS + 1; i++)
+            over[i] = ' ';
+        over[0] = '['; over[1] = '1'; over[2] = ' '; over[3] = '2'; over[4] = ']';
+        over[GB_PARSE_MAX_ITEMS + 1] = '\0';
+        parse_fails("a line one character over the limit is refused", over,
+                    "that line is too long");
     }
 }
 

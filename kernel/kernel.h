@@ -127,6 +127,17 @@ int  gb_step(noun line, noun session, noun *out);
  * could not.  GB_PARSE_EMPTY is not an error: a line with nothing on it is a
  * request to be shown the session, not a mistake. */
 
+/* The reader's limits, which are part of its contract: a line longer than this
+ * is refused by name rather than walked off the end of an array, and so is a
+ * line with too many open brackets or too many items.  They are here rather than
+ * in guestbook.c because the host compiler has to know the transport budget it
+ * compiles into, and because a test that hard-codes 32 and 40 is a test that
+ * rots the moment a limit moves.  See docs/decisions.md item 21 for why they are
+ * this size, which was a person's typing and is now a compiler's. */
+#define GB_LINE_MAX         4096
+#define GB_PARSE_MAX_DEPTH  256
+#define GB_PARSE_MAX_ITEMS  4096
+
 #define GB_PARSE_OK     0
 #define GB_PARSE_EMPTY  1
 #define GB_PARSE_ERROR  2

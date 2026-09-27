@@ -21,10 +21,17 @@ No operating system, no libc, no bootloader, no disk, no network. The only piece
 of hardware it touches is the 16550 serial port at 0x3f8, polled, one byte at a
 time.
 
-The whole machine is 2,185 lines, counting non-blank lines with `/* */` and
-`//` comments stripped: 133 of assembly to reach long mode, 1,272 of C, and 780
-of tests. (Stated that way because the previous figure, 1,991, could not be
-reproduced by any counting method and was therefore not worth carrying.) It
+The whole machine is 2,295 lines, counting non-blank lines with `/* */` and
+`//` comments stripped: 133 of assembly to reach long mode, 1,272 of C, 775 of
+tests, and 115 of headers. `make lines` runs the count, so the figure is a
+command and not a claim. (Stated that way because the previous figure, 1,991,
+could not be reproduced by any counting method and was therefore not worth
+carrying, and because a number nobody can re-derive is a number nobody should
+trust: the method is `tools/lines.awk`, and it is awk because a `/*` comment can
+open on one line and close on another, which any per-line filter gets wrong.
+This figure is larger than the 2,185 it replaces mostly because the headers are
+counted now, and it is smaller in the tests because this method strips a little
+more than whatever produced 780.) It
 implements Nock 4K — all twelve opcodes — over a noun representation where
 atoms are 63-bit numbers and cells point into an arena that only ever grows, so
 the state of the machine is a log and its history is everything it has already
@@ -40,6 +47,7 @@ make        # build build/boot.elf and build/boot.bin
 make run    # boot it, watch the serial line
 make test   # boot it, fail the build if any check fails
 make debug  # boot it with QEMU stopped at the reset vector
+make lines  # count the machine's lines, the way this README counts them
 make clean
 ```
 
@@ -53,6 +61,12 @@ Ctrl-D rather than hanging: `[1 42 0]` is a formula, and there is one build and
 one binary, so there is no test mode to switch into.
 
     printf '[1 42 0]\n\004' | make run
+
+A line may be 4096 characters, with 256 open brackets and 4096 items in it,
+which is the same as saying that Step 3's compiler has to fit inside a page;
+a longer line is refused by name rather than truncated. Those three numbers are
+in `kernel.h` and are part of the reader's contract, so a host program can read
+them rather than guess them.
 
 Type a formula in brackets and press enter, and the machine runs it and answers:
 
