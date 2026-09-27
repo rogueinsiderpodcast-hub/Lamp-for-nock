@@ -21,8 +21,8 @@ No operating system, no libc, no bootloader, no disk, no network. The only piece
 of hardware it touches is the 16550 serial port at 0x3f8, polled, one byte at a
 time.
 
-The whole machine is 1,475 lines, counting code but not comments or blank
-lines: 133 of assembly to reach long mode, 946 of C, and 396 of tests. It
+The whole machine is 1,991 lines, counting code but not comments or blank
+lines: 133 of assembly to reach long mode, 1,200 of C, and 658 of tests. It
 implements Nock 4K — all twelve opcodes — over a noun representation where
 atoms are 63-bit numbers and cells point into an arena that only ever grows, so
 the state of the machine is a log and its history is everything it has already
@@ -45,6 +45,14 @@ make clean
 boot, prints a pass or fail line for every check, and exits QEMU with a status
 the Makefile turns into a build failure. There is no host-side test harness
 because there is no host-side machine to test.
+
+It then opens the guest book and waits, which is why the test pipes a line and a
+Ctrl-D rather than hanging: `[1 42 0]` is a formula, and there is one build and
+one binary, so there is no test mode to switch into.
+
+    printf '[1 42 0]\n\004' | make run
+
+Type a noun in brackets, press enter, and the machine tells you what it read.
 
 ## Layout
 
@@ -113,9 +121,10 @@ fully readable machine whose entire state is an append-only list, whose native
 trust base is twenty functions you can read in one sitting, and whose history is
 not deleted but appended to.
 
-Step 2 adds a Hoon compiler running on the host. Step 3 adds the guest book: a
-real program inside this machine that computes its own next state from its own
-history.
+Step 2 is the guest book: a real program inside this machine that computes its
+own next state from its own history, and remembers everything you did this
+session. Step 3 is the bridge — a Hoon compiler running on the host, so that
+the instructions you type are written in a language rather than in brackets.
 
 ## Licence
 

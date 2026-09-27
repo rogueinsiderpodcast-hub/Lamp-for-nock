@@ -14,10 +14,21 @@ CFLAGS := -std=c11 -O2 -g \
           -fno-pic -fno-pie -fno-stack-protector \
           -fno-asynchronous-unwind-tables -fno-unwind-tables \
           -fomit-frame-pointer \
+          -mgeneral-regs-only \
           -Wall -Wextra -Werror -Wno-unused-parameter \
           -Ikernel -Itests
 
-ASFLAGS := -ffreestanding -fno-pic
+# -mgeneral-regs-only is load-bearing, and not an optimisation choice.  The boot
+# code puts the CPU in long mode and does nothing else: CR4.OSFXSR and
+# CR4.OSXMMEXCPT are never set, so there is no SSE state and any SSE
+# instruction traps as an invalid opcode.  gcc is entitled to reach for SSE2
+# when vectorising a loop -- it did so on a 96-byte memset in the reader's
+# tests, and the machine triple-faulted with EAX full of ']' -- so the machine
+# has to be built to match what the boot code enables rather than the other way
+# round.  The machine has no floating point and no SIMD, so nothing is lost.
+# See docs/decisions.md item 16.
+
+ASFLAGS := -ffreestanding -fno-pic -mgeneral-regs-only
 
 LDFLAGS := -T boot/link.ld --build-id=none -z noexecstack
 
@@ -27,7 +38,7 @@ IMAGE   := $(BUILD)/boot.bin
 
 C_SRCS  := kernel/serial.c kernel/memory.c kernel/noun.c kernel/nock.c \
            kernel/primitives.c kernel/guestbook.c kernel/main.c \
-           tests/nock-tests.c
+           tests/harness.c tests/nock-tests.c tests/guestbook-tests.c
 ASM_SRCS := boot/boot.S
 OBJS    := $(patsubst %.c,$(BUILD)/%.o,$(C_SRCS)) \
            $(patsubst %.S,$(BUILD)/%.o,$(ASM_SRCS))
@@ -43,8 +54,17 @@ QEMU := qemu-system-x86_64 -machine pc -m 256 -no-reboot \
 
 all: $(KERNEL)
 
+# The isa-debug-exit device turns the machine's own verdict into QEMU's exit
+# status as (code << 1) | 1, so a clean halt is 1 and a machine that found a
+# failing check is 3.  QEMU's own failures are something else again.  Left
+# unhandled, a clean Ctrl-D made make report a build error, so the one command
+# that runs the machine for a person also always looked broken.
 run: $(KERNEL)
-	$(QEMU) -kernel $(KERNEL)
+	@$(QEMU) -kernel $(KERNEL); \
+	status=$$?; \
+	if [ $$status -ne 1 ]; then \
+	    echo "make run: qemu exited with $$status (1 is a clean halt)"; exit 1; \
+	fi
 
 # The guest book reads bytes until it sees Ctrl-D, so a test run has to supply
 # one.  Feeding a real formula and checking the answer is in the output makes
@@ -52,7 +72,7 @@ run: $(KERNEL)
 # print, exit -- rather than stopping at the self-test.  The exit status still
 # comes from the isa-debug-exit device inside the guest, never from grep.
 test: $(KERNEL)
-	@printf '[1 42]\n\004' | $(QEMU) -kernel $(KERNEL) > $(BUILD)/test.log 2>&1; \
+	@printf '[1 42 0]\n\004' | $(QEMU) -kernel $(KERNEL) > $(BUILD)/test.log 2>&1; \
 	status=$$?; \
 	if [ $$status -eq 1 ] && grep -q 'LAMP: LIT' $(BUILD)/test.log; then \
 	    echo "make test: the machine halted cleanly and every check passed"; \

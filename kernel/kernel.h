@@ -42,10 +42,6 @@ void serial_put_dec(u64 v);
 void serial_put_hex(u64 v);
 void serial_put_nl(void);
 
-/* --- guestbook.c -------------------------------------------------------- */
-
-void gb_run(void);
-
 /* --- memory.c ---------------------------------------------------------- */
 
 extern u64 kernel_start_phys;
@@ -106,6 +102,23 @@ u64         nock_jet_fires(void);
 void        nock_jet_hooks(int enable);
 u64         nock_opcode(noun formula);   /* 0..11, or NOCK_NO_OPCODE */
 #define NOCK_NO_OPCODE 0xFFFFFFFFFFFFFFFFULL
+
+/* --- guestbook.c -------------------------------------------------------- */
+/* The guest book: the first thing on the machine that answers.
+ *
+ * gb_parse() is the reader, and it is the only part of the guest book with a
+ * grammar rather than a job.  It turns typed ASCII into a noun, or says why it
+ * could not.  GB_PARSE_EMPTY is not an error: a line with nothing on it is a
+ * request to be shown the session, not a mistake. */
+
+#define GB_PARSE_OK     0
+#define GB_PARSE_EMPTY  1
+#define GB_PARSE_ERROR  2
+
+int  gb_parse(const char *text, u64 len, noun *out, const char **why);
+int  gb_reader_ok(void);
+u64  noun_capacity(void);
+void gb_run(void);
 
 /* --- primitives.c ------------------------------------------------------ */
 /* The native primitive bank: a fixed, enumerable list of integer operations.

@@ -131,7 +131,7 @@ void kmain(u64 boot_params_phys)
 
 
     rule("self-test");
-    int failures = nock_tests_run();
+    int failures = self_test_run();
 
     rule("checklist");
     step(1, "boots straight into 64-bit long mode, no bootloader");
@@ -142,6 +142,7 @@ void kmain(u64 boot_params_phys)
     step(1, "a formula that reduces to itself stops instead of hanging");
     step(prim_count() == 20, "twenty native primitives, nothing else");
     step(nock_jet_fires() > 0, "a native jet ran from a hint");
+    step(gb_reader_ok(), "a typed line comes back as the noun it is");
     step(failures == 0, "every self-test check passed");
 
     int lit = failures == 0 && checklist_pass == checklist_total;

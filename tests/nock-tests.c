@@ -22,6 +22,7 @@
 
 #include "kernel.h"
 #include "tests.h"
+#include "harness.h"
 
 /* --- builders ---------------------------------------------------------- */
 
@@ -38,115 +39,6 @@ static noun f3(u64 op, noun a, noun b, noun c)  { return C(A(op), C(a, C(b, C(c,
 /* Data, not formulas. */
 static noun d2(noun a, noun b)         { return C(a, C(b, A(0))); }
 static noun d3(noun a, noun b, noun c) { return C(a, C(b, C(c, A(0)))); }
-
-/* --- harness ----------------------------------------------------------- */
-
-static int tests_run;
-static int tests_failed;
-
-static void group(const char *name)
-{
-    serial_put_nl();
-    serial_puts("  ");
-    serial_puts(name);
-    serial_put_nl();
-}
-
-static void pass(const char *what)
-{
-    tests_run++;
-    serial_puts("  pass  ");
-    serial_puts(what);
-    serial_put_nl();
-}
-
-static void check(int condition, const char *what)
-{
-    if (condition) {
-        pass(what);
-        return;
-    }
-    tests_run++;
-    tests_failed++;
-    serial_puts("  FAIL  ");
-    serial_puts(what);
-    serial_puts("   <<<< FAILED");
-    serial_put_nl();
-}
-
-static void expect_noun(const char *what, noun subject, noun formula, noun expected)
-{
-    noun got = 0;
-    int rc = nock_run(subject, formula, &got);
-
-    tests_run++;
-    if (rc == NOCK_OK && noun_equal(got, expected)) {
-        serial_puts("  pass  ");
-        serial_puts(what);
-        serial_put_nl();
-        return;
-    }
-    serial_puts("  FAIL  ");
-    serial_puts(what);
-    if (rc != NOCK_OK) {
-        serial_puts("   crashed: ");
-        serial_puts(nock_crash_reason());
-        serial_puts("  [subject word ");
-        serial_put_dec((u64)subject);
-        serial_puts(" formula word ");
-        serial_put_dec((u64)formula);
-        serial_puts("]");
-    } else {
-        serial_puts("   got ");
-        noun_print(got);
-        serial_puts(" want ");
-        noun_print(expected);
-    }
-    serial_puts("   <<<< FAILED");
-    serial_put_nl();
-    tests_failed++;
-    /* Leave the machine clean.  A crashed evaluation leaves machine_err set,
-     * and noun_cons refuses to build while it is, so a formula assembled after
-     * this point would come out as the atom 0 and every later test would fail
-     * for the wrong reason.  Resetting here is also the point: the machine is
-     * supposed to carry on after a crash. */
-    machine_reset_error();
-}
-
-static void expect_atom(const char *what, noun subject, noun formula, u64 expected)
-{
-    expect_noun(what, subject, formula, A(expected));
-}
-
-static void expect_code(const char *what, int code, noun subject, noun formula)
-{
-    noun got = 0;
-    int rc = nock_run(subject, formula, &got);
-
-    tests_run++;
-    if (rc == code) {
-        serial_puts("  pass  ");
-        serial_puts(what);
-        serial_put_nl();
-        /* A crash that was expected still leaves machine_err set, and
-         * noun_cons will not build while it is.  Clear it so the next formula
-         * is assembled from a clean machine. */
-        machine_reset_error();
-        return;
-    }
-    tests_failed++;
-    serial_puts("  FAIL  ");
-    serial_puts(what);
-    if (rc == NOCK_OK)
-        serial_puts("   it did not crash at all");
-    else {
-        serial_puts(rc == NOCK_CRASH ? "   wrong kind of crash: " : "   wrong kind of stop: ");
-        serial_puts(nock_crash_reason());
-    }
-    serial_puts("   <<<< FAILED");
-    serial_put_nl();
-    machine_reset_error();
-}
 
 /* --- nouns ------------------------------------------------------------- */
 
@@ -398,56 +290,6 @@ static void test_crashes(void)
 
 /* --- native primitives ------------------------------------------------- */
 
-static u64 prim_try(const char *name, u64 a, u64 b, int *crashed)
-{
-    int index = prim_index(name);
-    if (index < 0) {
-        *crashed = 1;
-        return 0;
-    }
-    machine_reset_error();
-    u64 result = prim_call(index, a, b);
-    *crashed = machine_err;
-    return result;
-}
-
-static void expect_prim(const char *name, u64 a, u64 b, u64 expected)
-{
-    int crashed = 0;
-    u64 got = prim_try(name, a, b, &crashed);
-
-    if (!crashed && got == expected) {
-        pass(name);
-        return;
-    }
-    tests_run++;
-    tests_failed++;
-    serial_puts("  FAIL  ");
-    serial_puts(name);
-    serial_puts("(");
-    serial_put_dec(a);
-    serial_puts(", ");
-    serial_put_dec(b);
-    serial_puts(") gave ");
-    serial_put_dec(got);
-    if (crashed) {
-        serial_puts(" and crashed: ");
-        serial_puts(nock_crash_reason());
-    }
-    serial_puts("   <<<< FAILED");
-    serial_put_nl();
-}
-
-static void expect_prim_crash(const char *name, u64 a, u64 b)
-{
-    int crashed = 0;
-    prim_try(name, a, b, &crashed);
-    check(crashed, name);
-    /* prim_try resets before it runs, not after, so the crash this expected
-     * would otherwise be the state the next noun is built in. */
-    machine_reset_error();
-}
-
 static void test_primitives(void)
 {
     group("native primitives");
@@ -553,32 +395,26 @@ static void test_solid_state(void)
     check(rc1 == NOCK_OK && rc2 == NOCK_OK && noun_equal(first, second),
           "the same subject and formula give the same answer");
     check(noun_cell_count() > cells_before, "and it grew the arena again rather than reusing it");
+
+    /* The ceiling, in the one place it matters.  Everything the guest book will
+     * keep is a noun, so this number is how long a session can get. */
+    serial_puts("  the arena holds ");
+    serial_put_dec(noun_capacity());
+    serial_puts(" cells, and holds ");
+    serial_put_dec(noun_cell_count());
+    serial_puts(" of them now\n");
 }
 
 /* --- entry point ------------------------------------------------------- */
 
 int nock_tests_run(void)
 {
-    tests_run    = 0;
-    tests_failed = 0;
-
-    serial_puts("Lamp kernel self-test");
-    serial_put_nl();
-
+    machine_reset_error();
     test_nouns();
     test_opcodes();
     test_jets();
     test_crashes();
     test_primitives();
     test_solid_state();
-
-    serial_put_nl();
-    serial_puts("  ");
-    serial_put_dec((u64)tests_run);
-    serial_puts(" checks, ");
-    serial_put_dec((u64)tests_failed);
-    serial_puts(" failed");
-    serial_put_nl();
-
-    return tests_failed;
+    return tests_failed_count();
 }

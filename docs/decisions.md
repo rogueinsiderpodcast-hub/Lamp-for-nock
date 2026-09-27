@@ -451,3 +451,74 @@ speed of a serial port rather than a socket. At 115200 baud that is not a limit
 anything here can feel, and a 16-byte FIFO would have bought nothing for a
 machine that reads one byte at a time and then stops.
 
+
+---
+
+## 16. The build forbids SSE, because the boot code never enables it
+
+**Decided:** `CFLAGS` and `ASFLAGS` both carry `-mgeneral-regs-only`. No SSE
+register, no AVX, no vectorised anything.
+
+**Why:** found the hard way, by a triple fault. The reader's test suite builds a
+96-byte buffer of `]` characters, gcc vectorises the fill, and the machine dies
+with `EAX = 0x5d5d5d5d` and an invalid opcode at the `movd`. The boot code puts
+the CPU in long mode and stops: `CR4.OSFXSR` and `CR4.OSXMMEXCPT` are never set,
+so there is no SSE state and any SSE instruction traps as `#UD`. Nothing in the
+machine had needed SIMD before, so 139 checks passed on a kernel that would have
+died the moment the compiler used a register it was entitled to use.
+
+**Why not enable SSE in the boot code instead:** that is defensible and would
+also work. It is three more CR4 bits, and if the compiler is ever allowed to
+emit `fxsave`/`fxrstor` it is also a 512-byte FXSAVE area aligned to 64 bytes --
+real state to get right, for a machine with no floating point and no SIMD to run.
+The machine's rule is that the hardware is one serial port and nothing else, and
+the cheapest honest way to keep that true is to build to match what the boot
+code enables rather than the other way round.
+
+**Cost:** a loop that gcc would have widened stays narrow, and the flag is
+cc-specific. `-march=native` in a future build would bring the same fault back,
+which is why this is written down rather than left in a Makefile as a mystery.
+
+---
+
+## 17. The reader collects items and folds them right-nested
+
+**Decided:** `gb_parse` keeps one array of finished nouns and one frame stack of
+`(start, count)` pairs. When a `]` closes a frame, the frame's items are folded
+right-nested, last one first, and the result goes back into the array where they
+were. A line is one noun; more than one at the top level is a refusal with a
+reason.
+
+**Why:** Nock's brackets are right-nested -- `[1 42 7]` is `[1 [42 7]]` -- and
+that cannot be built by consing onto an accumulator as the characters arrive,
+which gives `[[1 42] 7]`, a different noun. It cannot be built by amending the
+tail as it goes either, because a noun is never rewritten once it exists: that
+is the same immutability the solid-state test is about. So the items are
+collected and folded backwards at the `]`, which is the only order that can be
+right, and which also happens to be the clearest to read.
+
+**Cost:** one noun per item, on the stack, bounded by `GB_PARSE_MAX_ITEMS` (128,
+one per character at worst) and `GB_PARSE_MAX_DEPTH` (32 open brackets). Both
+are refused with a reason rather than run off the end. A formula is not a thing
+a person types with 32 brackets, and a 129-character line is not either.
+
+---
+
+## 18. The machine's verdict is QEMU's exit status
+
+**Decided:** the guest writes to QEMU's `isa-debug-exit` port, which turns a code
+into an exit status of `(code << 1) | 1`. So status 1 is a clean halt and status
+3 is a machine that found a failing check. `make test` reads both, and `make run`
+treats 1 as success and anything else as a failure.
+
+**Why:** it is the only way this machine has to say something to the host, and
+it should be the one it uses rather than a grep over the serial log. `make test`
+was the reason this exists -- a test that only fails if someone reads the output
+is a test that gets skipped.
+
+**Cost:** the codes are QEMU's convention, not ours, so they are one step removed
+and easy to misread. The `run` target had it wrong in the other direction for a
+while: it passed QEMU's status straight through to make, so Ctrl-D -- the
+documented way to leave -- always reported a build error. Both directions of
+that mistake are invisible unless you pipe input into `make run`, which is
+exactly what a person does when they are not at a terminal.

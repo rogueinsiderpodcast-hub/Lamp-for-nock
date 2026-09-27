@@ -13,7 +13,7 @@ of them still leaves something real.
 | Step | One-sentence goal | New idea | State |
 |---|---|---|---|
 | **1. Lamp** | It boots, and it counts. | the twenty shortcuts work | **done — green** |
-| **2. Guest Book** | You type at it, it answers, and it remembers everything you did this session. | 1 + 2, writing rather than mutating | next |
+| **2. Guest Book** | You type at it, it answers, and it remembers everything you did this session. | 1 + 2, writing rather than mutating | **in progress** |
 | **3. Teacher** | You write instructions in a real language, and they run. | 3, code is data | not started |
 | **4. Notebook** | The guest book survives the power being turned off. | durability | not started |
 | **5. New Rules** | The machine rewrites its own behaviour from text you send it, and cannot be broken by it. | 5, it cannot be lied to | not started |
@@ -141,22 +141,47 @@ could be read:
   wrong for the others, because address 14 sits at a depth where the two shapes
   happen to coincide.
 
-## How to finish Step 2
+## Where Step 2 stands
 
-Step 1 needed no argument to fix: the specification was in `decisions.md`, the
-tests, and `vere/doc/spec/nock/4.txt`, and it was enough. Step 2 should be
-specified before it is built, in one page, answering:
+**Halfway, and the half that is done is done properly.** The self-test is 186
+checks, 0 failing, `LAMP: LIT`, checklist 10 of 10. A line of text typed at the
+machine comes back as the noun it is, and a line that is not a noun is refused
+with a reason.
 
-1. **What is a session, concretely?** What the machine remembers and what
-   "everything you did this session" means, stated as nouns rather than prose.
-2. **What does typing look like?** The character set, line editing, and whether
-   a line is submitted on enter or is a formula evaluated as it is typed.
-3. **What does writing instead of mutating change here?** Step 2's one new idea
-   is that a noun is produced rather than edited in place. The arena is
-   append-only, so this should be nearly free — confirm that, and write down what
-   it costs if it is not.
-4. **How much fits?** How long a session can get before the arena is a problem,
-   so Step 4 is designed for rather than discovered at.
+Done: the serial line in both directions, line editing with backspace, a
+grammar for nouns in brackets, and a parser for it. The reader's suite is 47
+checks, and the last ten of them tie it to the interpreter -- a formula typed as
+text is compared against the same formula built in C, so everything the Nock
+suite proves about the built one is proved about the typed one too.
+
+Not done: the session. Nothing is kept yet, and the guest book says so when you
+leave it.
+
+### The four questions, answered
+
+1. **What is a session, concretely?** A session is `[log last count]`. The log
+   is newest-first, each entry `[line answer]`, so an append is one cons onto the
+   front and nothing existing is touched. `last` is the most recent subject, so
+   the next formula is evaluated against the state the last one produced. `count`
+   is the number of entries, which makes a blank line's "how long have we been
+   going" answer a noun rather than a counter in C.
+2. **What does typing look like?** Settled by measurement, not taste: printable
+   ASCII, enter submits a whole line, backspace deletes, Ctrl-D leaves. A line is
+   one noun and is submitted on enter rather than evaluated as it is typed,
+   because a half-typed `[6 [3 [0 ` is not a thing to evaluate. The grammar is
+   decimal atoms and right-nested bracketed lists, in `decisions.md` item 17.
+3. **What does writing instead of mutating change here?** Confirmed nearly free,
+   and the parser is the proof: it cannot amend the tail of a noun as it reads,
+   so it collects the items and folds them right-nested when the bracket closes.
+   A 39-character formula costs 38 new cells and rewrites nothing. The cost of
+   immutability here is that items have to be held until their order is known.
+4. **How much fits?** The arena is half the heap at 16 bytes a cell, and the
+   machine now says so: 8,317,440 cells with QEMU's 256MB, 406 used by the
+   self-test. A line costs about 3 cells at one character and about 130 at a
+   full 128-character line, so a session runs to somewhere between tens of
+   thousands and a couple of million entries -- and when the arena is full,
+   `noun_cons` crashes rather than reusing, which is Step 4's problem to solve
+   and not something to discover at.
 
 ## The questions waiting on the bridge
 

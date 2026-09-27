@@ -44,6 +44,11 @@ void noun_init(void)
         return;
 }
 
+/* How many cells the arena can ever hold.  The machine has no other way to
+ * answer "how long a session can get", and the answer is a number noun_cell_count
+ * cannot give: it reports what has been used, not what there is. */
+u64 noun_capacity(void) { return arena_cap; }
+
 u64 noun_cell_count(void)
 {
     return arena_count;
