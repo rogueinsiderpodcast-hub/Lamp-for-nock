@@ -69,8 +69,12 @@ noun noun_cons(noun head, noun tail)
     }
     arena[arena_count].head = head;
     arena[arena_count].tail = tail;
+    /* The noun is the index of the cell just written, so it has to be formed
+     * before the count moves on.  Forming it afterwards would name the cell
+     * after this one. */
+    noun cell = (arena_count << 1) | 1;
     arena_count++;
-    return (arena_count << 1) | 1;
+    return cell;
 }
 
 noun noun_head(noun n)
@@ -113,6 +117,29 @@ int noun_equal(noun a, noun b)
     return noun_equal(noun_tail(a), noun_tail(b));
 }
 
+/* A tree address is a path from the root written as a binary number: the
+ * leading 1 is the root, and each bit after it is one step down, 0 for the
+ * head and 1 for the tail.  So 6 is 1-1-0, the head of the tail.
+ *
+ * That means the bits have to be read from the most significant end down.
+ * Peeling the least significant bit first and descending as it goes walks the
+ * same steps in the opposite order, which for a deep address names a different
+ * part of the noun entirely. */
+static int axis_depth(u64 axis)
+{
+    int depth = 0;
+    while (axis > 1) {
+        depth++;
+        axis >>= 1;
+    }
+    return depth;
+}
+
+static u64 axis_path(u64 axis)
+{
+    return axis & ((1ULL << axis_depth(axis)) - 1);
+}
+
 /* /[axis noun] -- the subtree at a tree address.
  *
  * The root is 1, the left child of n is 2n, the right child is 2n+1.  Address
@@ -132,9 +159,16 @@ noun noun_slot(noun n, u64 axis)
         machine_crash("tree address descends into an atom");
         return 0;
     }
-    if (axis & 1)
-        return noun_slot(noun_tail(n), axis >> 1);
-    return noun_slot(noun_head(n), axis >> 1);
+
+    int depth = axis_depth(axis);
+    u64 path  = axis_path(axis);
+    u64 top   = 1ULL << (depth - 1);
+    /* The address of the subtree one step down is the leading 1 followed by
+     * whatever is left of the path. */
+    u64 below = top | (path & (top - 1));
+    noun step = (path & top) ? noun_tail(n) : noun_head(n);
+
+    return noun_slot(step, below);
 }
 
 /* #[axis value noun] -- the noun at a tree address, with that one part
@@ -157,13 +191,21 @@ noun noun_edit(noun n, u64 axis, u64 value)
         machine_crash("tree address descends into an atom");
         return 0;
     }
-    if (axis & 1) {
-        noun new_tail = noun_edit(noun_tail(n), axis >> 1, value);
+    int depth = axis_depth(axis);
+    u64 path  = axis_path(axis);
+    u64 top   = 1ULL << (depth - 1);
+    /* The address of the subtree one step down is the leading 1 followed by
+     * whatever is left of the path.  Stripping the leading 1 would leave a
+     * bare path, which is not a tree address at all. */
+    u64 below = top | (path & (top - 1));
+
+    if (path & top) {
+        noun new_tail = noun_edit(noun_tail(n), below, value);
         if (machine_err)
             return 0;
         return noun_cons(noun_head(n), new_tail);
     }
-    noun new_head = noun_edit(noun_head(n), axis >> 1, value);
+    noun new_head = noun_edit(noun_head(n), below, value);
     if (machine_err)
         return 0;
     return noun_cons(new_head, noun_tail(n));

@@ -1,9 +1,9 @@
 /* Link script for the Lamp kernel image.
  *
- * The image is loaded by QEMU's multiboot loader at 0x100000, so the link
- * address is fixed.  The multiboot header lives in its own section that is
- * placed first, which keeps it inside the first 8 KiB of the file as the
- * multiboot specification requires.
+ * The image is a 64-bit ELF loaded by QEMU's -kernel path, which finds the
+ * 32-bit entry point in a PVH ELF note inside the first loadable segment (see
+ * boot/boot.S).  The link address is fixed at 0x100000, which is well above
+ * the low memory the firmware and the boot parameters occupy.
  *
  * Everything ends up in one RWX load segment; there is no other program
  * header, no interpreter and no dynamic linking.
@@ -16,9 +16,11 @@ SECTIONS
     . = 0x100000;
     __kernel_start = .;
 
-    .multiboot ALIGN(8) :
+    /* The PVH note has to be inside a loadable segment and near its start, so
+     * it goes before .text rather than being discarded as a normal note. */
+    .note.Xen ALIGN(4) :
     {
-        KEEP(*(.multiboot))
+        KEEP(*(.note.Xen))
     }
 
     .text ALIGN(16) :
@@ -51,7 +53,7 @@ SECTIONS
     /DISCARD/ :
     {
         *(.comment)
-        *(.note .note.*)
+        *(.note.gnu.*)
         *(.eh_frame)
         *(.eh_frame_hdr)
     }

@@ -46,12 +46,13 @@ void serial_put_nl(void);
 extern u64 kernel_start_phys;
 extern u64 kernel_end_phys;
 
-void  mem_init(u64 mb_info_phys);
+void  mem_init(u64 boot_params_phys);
 void *mem_alloc(u64 size, u64 align);
 u64   mem_heap_start(void);
 u64   mem_heap_end(void);
 u64   mem_heap_used(void);
 u64   mem_largest_free_region(void);
+u64   mem_map_unreadable(void);
 
 /* --- noun.c ------------------------------------------------------------ */
 /* A noun is one 64-bit word.
@@ -135,6 +136,6 @@ u64             prim_call(int index, u64 a, u64 b);
 
 /* --- main.c ------------------------------------------------------------ */
 
-void kmain(u64 mb_info_phys);
+void kmain(u64 boot_params_phys);
 
 #endif /* KERNEL_H */

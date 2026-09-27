@@ -1,4 +1,4 @@
-/* Memory: read the multiboot memory map, pick a heap, hand out bump
+/* Memory: read the boot loader's memory map, pick a heap, hand out bump
  * allocations.
  *
  * There is no free list and there never will be one in this machine.  Nouns
@@ -6,11 +6,22 @@
  * hand out the same bytes twice" and "don't hand out the kernel image".  A
  * bump pointer is the whole allocator.
  *
- * The boot loader hands us a multiboot 2 tag list.  Tag type 6 is the memory
- * map, and it is a sequence of 24-byte entries: base, length, type, and a
- * reserved word that must be zero.  Each entry is 8-byte aligned and every
- * tag is padded to a multiple of 8, so there is no struct layout to guess at
- * and no compiler-dependent padding to worry about.
+ * The boot loader is QEMU's PVH loader.  It enters the kernel in 32-bit
+ * protected mode with a physical address in %ebx, pointing at a start-info
+ * structure.  That structure carries a physical address and an entry count for
+ * a memory map: a list of fixed-size entries, each giving a base, a size and a
+ * type.
+ *
+ * Unlike the older multiboot 1 map, the PVH map has no reading to be guessed
+ * at.  Every entry is exactly 24 bytes, the base and size are 64-bit, and the
+ * count is given separately rather than encoded in the data.  So there is one
+ * layout, not two to be told apart, and this file has a single straight path
+ * through the entries.
+ *
+ * The structures are read field by field at fixed offsets rather than by
+ * casting to a C struct.  The layout happens to be padding-free, so a struct
+ * would come out the same, but offsets say what they mean and cannot drift if
+ * the compiler or the word size changes.
  */
 
 #include "kernel.h"
@@ -22,26 +33,45 @@ extern u8 __kernel_start[];
 u64 kernel_start_phys;
 u64 kernel_end_phys;
 
-#define MB2_MAGIC        0xE85250D6u
-#define MB2_TAG_END      0u
-#define MB2_TAG_MMAP     6u
-#define MB2_MEM_AVAILABLE 1u
-#define MB2_TAG_HEADER   8u
-#define MB2_MMAP_ENTRY   24u
+#define PVH_MAGIC      0x336ec578u
+
+/* Memory-map entry types.  Only RAM is ours to hand out. */
+#define PVH_MEM_UNUSED 0u
+#define PVH_MEM_RAM    1u
+
+/* Field offsets within the start-info structure. */
+#define PVH_OFF_MAGIC           0
+#define PVH_OFF_MEMMAP_PADDR   40
+#define PVH_OFF_MEMMAP_ENTRIES 48
+
+/* Field offsets within one memory-map entry, and the size of the whole entry. */
+#define PVH_MAP_OFF_ADDR  0
+#define PVH_MAP_OFF_SIZE  8
+#define PVH_MAP_OFF_TYPE 16
+#define PVH_MAP_SIZE     24
+
+/* No real e820 table comes close to this.  It exists so a nonsense count cannot
+ * walk us off the end of the map. */
+#define PVH_MAX_ENTRIES 128
 
 static u64 heap_start;
 static u64 heap_end;
 static u64 heap_next;
 static u64 largest_free;
 
+/* Number of map entries the parser could not make sense of.  Should be zero;
+ * a non-zero count is printed so a bad layout cannot pass unnoticed. */
+static u64 map_unreadable;
+
 u64 mem_heap_start(void) { return heap_start; }
 u64 mem_heap_end(void)   { return heap_end; }
 u64 mem_heap_used(void)  { return heap_next - heap_start; }
 u64 mem_largest_free_region(void) { return largest_free; }
+u64 mem_map_unreadable(void) { return map_unreadable; }
 
-/* Read the multiboot structures byte by byte.  They are 8-byte aligned, but
- * this costs nothing and it means the kernel never depends on being able to
- * make an unaligned access. */
+/* Read the boot loader's structures byte by byte.  They are normally aligned,
+ * but this costs nothing and it means the kernel never depends on being able
+ * to make an unaligned access. */
 static u32 rd32(const u8 *p)
 {
     return (u32)p[0]
@@ -60,7 +90,37 @@ static u64 align_up(u64 value, u64 align)
     return (value + align - 1) & ~(align - 1);
 }
 
-void mem_init(u64 mb_info_phys)
+/* Is this plausible as a memory map entry?
+ *
+ * The type is a small number, the length is not zero, and the region does not
+ * wrap round the end of the address space.  An entry that fails is counted
+ * rather than believed, so a map read wrongly cannot quietly hand back a heap
+ * that overlaps the kernel or runs off the end of RAM. */
+static int entry_plausible(u64 base, u64 length, u32 type)
+{
+    if (type > 5)
+        return 0;
+    if (length == 0)
+        return 0;
+    if (base + length < base)
+        return 0;
+    if (base + length > 0x1000000000000ULL)   /* 2^48: no real machine is bigger */
+        return 0;
+    return 1;
+}
+
+/* Read one fixed-layout map entry.  There is only one layout to read, so this
+ * fills in what it was asked for and returns 0 if the entry is not believable. */
+static int read_entry(const u8 *p, u64 *base, u64 *length, u32 *type)
+{
+    *base   = rd64(p + PVH_MAP_OFF_ADDR);
+    *length = rd64(p + PVH_MAP_OFF_SIZE);
+    *type   = rd32(p + PVH_MAP_OFF_TYPE);
+
+    return entry_plausible(*base, *length, *type);
+}
+
+void mem_init(u64 boot_params_phys)
 {
     kernel_start_phys = (u64)__kernel_start;
     kernel_end_phys   = (u64)__bss_end;
@@ -69,67 +129,62 @@ void mem_init(u64 mb_info_phys)
     heap_end     = 0;
     heap_next    = 0;
     largest_free = 0;
+    map_unreadable = 0;
 
-    if (mb_info_phys == 0) {
-        machine_crash("no multiboot information, so no memory map");
+    if (boot_params_phys == 0) {
+        machine_crash("no boot loader information, so no memory map");
         return;
     }
 
-    /* The identity map covers the low 2 GiB, so a physical address from the
-     * boot loader can be dereferenced directly. */
-    const u8 *info = (const u8 *)mb_info_phys;
+    /* The identity map covers the low 64 MiB, and the boot loader places its
+     * structures below 1 MiB, so a physical address it hands over can be
+     * dereferenced directly. */
+    const u8 *si = (const u8 *)(u64)boot_params_phys;
 
-    if (rd32(info) != MB2_MAGIC) {
-        machine_crash("the multiboot magic number is wrong");
+    if (rd32(si + PVH_OFF_MAGIC) != PVH_MAGIC) {
+        machine_crash("boot parameters are not a PVH start-info structure");
         return;
     }
 
-    u32 header_length = rd32(info + 8);
-    if (header_length < 16) {
-        machine_crash("the multiboot header claims to be shorter than it is");
-        return;
-    }
+    u64 map_paddr = rd64(si + PVH_OFF_MEMMAP_PADDR);
+    u32 entries   = rd32(si + PVH_OFF_MEMMAP_ENTRIES);
 
-    const u8 *tag     = info + 16;
-    const u8 *tag_end = info + header_length;
-    int found_map     = 0;
-
-    while ((const u8 *)tag + MB2_TAG_HEADER <= tag_end) {
-        u32 type = rd32(tag);
-        u32 size = rd32(tag + 4);
-
-        if (size < MB2_TAG_HEADER)
-            break;
-
-        if (type == MB2_TAG_MMAP) {
-            found_map = 1;
-            u32 count = (size - MB2_TAG_HEADER) / MB2_MMAP_ENTRY;
-            const u8 *entry = tag + MB2_TAG_HEADER;
-
-            for (u32 i = 0; i < count; i++) {
-                u64 base   = rd64(entry);
-                u64 length = rd64(entry + 8);
-                u32 kind   = rd32(entry + 16);
-
-                if (kind == MB2_MEM_AVAILABLE && length > largest_free) {
-                    largest_free = length;
-                    heap_start   = base;
-                    heap_end     = base + length;
-                }
-                entry += MB2_MMAP_ENTRY;
-            }
-        }
-
-        if (type == MB2_TAG_END)
-            break;
-
-        tag = (const u8 *)tag + ((size + 7u) & ~7u);
-    }
-
-    if (!found_map) {
+    if (map_paddr == 0 || entries == 0) {
         machine_crash("the boot loader gave no memory map");
         return;
     }
+
+    if (entries > PVH_MAX_ENTRIES) {
+        /* More entries than any e820 table holds.  Walk the sane part and say
+         * so, rather than trusting a count that cannot be right. */
+        map_unreadable = entries - PVH_MAX_ENTRIES;
+        entries = PVH_MAX_ENTRIES;
+    }
+
+    const u8 *p = (const u8 *)(u64)map_paddr;
+
+    for (u32 i = 0; i < entries; i++, p += PVH_MAP_SIZE) {
+        u64 base   = 0;
+        u64 length = 0;
+        u32 type   = 0;
+
+        /* Type 0 is the conventional end-of-map marker, even though the count
+         * should already have stopped us. */
+        if (rd32(p + PVH_MAP_OFF_TYPE) == PVH_MEM_UNUSED)
+            break;
+
+        if (!read_entry(p, &base, &length, &type)) {
+            map_unreadable++;
+            continue;
+        }
+
+        if (type == PVH_MEM_RAM && length > largest_free) {
+            largest_free = length;
+            heap_start   = base;
+            heap_end     = base + length;
+        }
+    }
+
     if (largest_free == 0) {
         machine_crash("no available memory in the memory map");
         return;

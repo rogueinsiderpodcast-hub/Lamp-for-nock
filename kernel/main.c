@@ -1,7 +1,7 @@
 /* kmain: the whole machine, in order.
  *
  * The C side of the world.  boot/boot.S got us here in long mode with a
- * multiboot info pointer in rdi; everything from this point on is C.
+ * PVH start-info pointer in rdi; everything from this point on is C.
  */
 
 #include "kernel.h"
@@ -77,7 +77,7 @@ static void step(int ok, const char *what)
         checklist_pass++;
 }
 
-void kmain(u64 mb_info_phys)
+void kmain(u64 boot_params_phys)
 {
     serial_init();
 
@@ -87,7 +87,7 @@ void kmain(u64 mb_info_phys)
     serial_put_nl();
 
     rule("memory");
-    mem_init(mb_info_phys);
+    mem_init(boot_params_phys);
     if (machine_err) {
         serial_puts("  memory: ");
         serial_puts(machine_err_msg);

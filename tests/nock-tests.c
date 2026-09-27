@@ -91,6 +91,11 @@ static void expect_noun(const char *what, noun subject, noun formula, noun expec
     if (rc != NOCK_OK) {
         serial_puts("   crashed: ");
         serial_puts(nock_crash_reason());
+        serial_puts("  [subject word ");
+        serial_put_dec((u64)subject);
+        serial_puts(" formula word ");
+        serial_put_dec((u64)formula);
+        serial_puts("]");
     } else {
         serial_puts("   got ");
         noun_print(got);
@@ -145,6 +150,7 @@ static u64 fingerprint(noun n, u64 acc)
 static void test_nouns(void)
 {
     group("nouns");
+    machine_reset_error();
 
     check(noun_is_atom(A(0)), "0 is an atom");
     check(noun_is_atom(A(12345)), "an atom is an even-tagged word");
@@ -163,22 +169,24 @@ static void test_nouns(void)
     check(!noun_equal(d2(A(1), A(2)), d3(A(1), A(2), A(3))),
           "a longer cell is not a shorter cell");
 
-    /* [11 [22 [33 0]]] : slot 1 is the noun, 2 the head, 3 the tail, 5 the head
-     * of the tail, 6 the tail of the tail, 7 the head of that. */
+    /* [11 [22 [33 0]]] : slot 1 is the noun, 2 the head, 3 the tail, 6 the head
+     * of the tail, 7 the tail of the tail, 14 the head of that.  Note that 4 and
+     * 5 are the two children of slot 2, which here is the atom 11, so they
+     * crash: the path to 22 runs through 3, not 2. */
     noun deep = d3(A(11), A(22), A(33));
     check(noun_equal(noun_slot(deep, 1), deep), "slot 1 of a noun is the noun");
     check(noun_equal(noun_slot(deep, 2), A(11)), "slot 2 is the head");
     check(noun_equal(noun_slot(deep, 3), d2(A(22), A(33))), "slot 3 is the tail");
-    check(noun_equal(noun_slot(deep, 5), A(22)), "slot 5 is the head of the tail");
-    check(noun_equal(noun_slot(deep, 6), d2(A(33), A(0))), "slot 6 is the tail of the tail");
-    check(noun_equal(noun_slot(deep, 7), A(33)), "slot 7 is the head of the tail of the tail");
+    check(noun_equal(noun_slot(deep, 6), A(22)), "slot 6 is the head of the tail");
+    check(noun_equal(noun_slot(deep, 7), C(A(33), A(0))), "slot 7 is the tail of the tail");
+    check(noun_equal(noun_slot(deep, 14), A(33)), "slot 14 is the head of the tail of the tail");
 
     /* #[axis value noun] rebuilds rather than writing through, so the original
      * keeps its value.  This is what makes the arena append-only in practice. */
     noun edited = noun_edit(deep, 2, A(99));
     check(noun_equal(edited, d3(A(99), A(22), A(33))), "edit replaces one part");
     check(noun_equal(deep, d3(A(11), A(22), A(33))), "edit leaves the original alone");
-    check(noun_equal(noun_edit(deep, 5, A(99)), d3(A(11), A(99), A(33))), "edit at a deeper address");
+    check(noun_equal(noun_edit(deep, 6, A(99)), d3(A(11), A(99), A(33))), "edit at a deeper address");
     check(noun_equal(noun_edit(deep, 1, A(7)), A(7)), "edit at address 1 replaces the whole noun");
 }
 
@@ -198,13 +206,13 @@ static void test_opcodes(void)
 
     /* [0 b] is a tree address in the subject.  The address is a literal, which
      * is why these formulas carry the atom 2 and not a formula for 2. */
-    expect_atom("[0 1] is the whole subject, when it is an atom", A(5), A(1), 5);
-    expect_noun("[0 1] is the whole subject, when it is a cell", s, A(1), s);
-    expect_atom("[0 2] is the head", s, A(2), 7);
-    expect_atom("[0 3] is the tail", s, A(3), 8);
-    expect_atom("[0 5] is the head of the tail", s2, A(5), 9);
-    expect_noun("[0 6] is the tail of the tail", s2, A(6), d2(A(10), A(0)));
-    expect_atom("[0 7] is the head of the tail of the tail", s2, A(7), 10);
+    expect_atom("[0 1] is the whole subject, when it is an atom", A(5), f1(0, A(1)), 5);
+    expect_noun("[0 1] is the whole subject, when it is a cell", s, f1(0, A(1)), s);
+    expect_atom("[0 2] is the head", s, f1(0, A(2)), 7);
+    expect_noun("[0 3] is the tail", s, f1(0, A(3)), C(A(8), A(0)));
+    expect_atom("[0 6] is the head of the tail", s2, f1(0, A(6)), 9);
+    expect_noun("[0 7] is the tail of the tail", s2, f1(0, A(7)), C(A(10), A(0)));
+    expect_atom("[0 14] is the head of the tail of the tail", s2, f1(0, A(14)), 10);
 
     /* [3 b] is 0 for a cell and 1 for an atom. */
     expect_atom("[3 [1 5]] is 1, because 5 is an atom", s, f1(3, f1(1, A(5))), 1);
@@ -275,7 +283,7 @@ static void test_opcodes(void)
                 d2(A(99), A(3)));
     expect_noun("[10] replaces address 3", triple, f2(10, C(A(3), f1(1, A(99))), A(1)),
                 d2(A(1), A(99)));
-    expect_noun("[10] replaces address 6", triple, f2(10, C(A(6), f1(1, A(99))), A(1)),
+    expect_noun("[10] replaces address 14", triple, f2(10, C(A(14), f1(1, A(99))), A(1)),
                 d3(A(1), A(2), A(99)));
     expect_noun("[10] takes its new value from a formula, not a literal", triple,
                 f2(10, C(A(2), A(7)), A(1)), d2(A(7), A(3)));
@@ -335,8 +343,8 @@ static void test_crashes(void)
     noun s      = d2(A(7), A(8));
     noun s_cell = d2(A(1), A(2));
 
-    expect_code("tree address 0 does not name a noun", NOCK_CRASH, s, A(0));
-    expect_code("a tree address cannot descend into an atom", NOCK_CRASH, s, A(4));
+    expect_code("tree address 0 does not name a noun", NOCK_CRASH, s, f1(0, A(0)));
+    expect_code("a tree address cannot descend into an atom", NOCK_CRASH, s, f1(0, A(4)));
     expect_code("cannot increment a cell", NOCK_CRASH, s_cell, f1(4, A(2)));
     expect_code("a formula must be a cell, so a bare atom is a crash", NOCK_CRASH, s, A(1));
     expect_code("12 is not a Nock instruction", NOCK_CRASH, s, f1(12, A(0)));
@@ -500,15 +508,16 @@ static void test_solid_state(void)
     u64  before = fingerprint(s, 7);
     u64  cells_before = noun_cell_count();
 
-    /* Push 55 onto the subject, then read address 4 of the new subject.  The
-     * new subject is [55 [1 [2 [3 0]]]], whose address 4 is the head of its
-     * tail, which is the head of the old subject: 1. */
-    noun pushed = f2(8, f1(1, A(55)), A(4));
-    expect_atom("push 55, then read address 4 of the pushed subject", s, pushed, 1);
+    /* Push 55 onto the subject, then read address 6 of the new subject.  The
+     * new subject is [55 [1 [2 [3 0]]]], whose address 6 is the head of its
+     * tail, which is the head of the old subject: 1.  Address 4 would be the
+     * head of the head, which is the atom 55. */
+    noun pushed = f2(8, f1(1, A(55)), A(6));
+    expect_atom("push 55, then read address 6 of the pushed subject", s, pushed, 1);
 
     /* Edit address 2 of the subject, evaluated through opcode 10. */
     noun edited = f2(10, C(A(2), f1(1, A(99))), A(1));
-    expect_noun("opcode 10 replaces address 2", s, edited, d2(A(99), A(3)));
+    expect_noun("opcode 10 replaces address 2", s, edited, d3(A(99), A(2), A(3)));
 
     check(fingerprint(s, 7) == before, "the subject is unchanged afterwards, part for part");
     check(noun_cell_count() > cells_before, "the arena only ever grows");
