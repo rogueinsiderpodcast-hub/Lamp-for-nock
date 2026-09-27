@@ -400,8 +400,13 @@ static void test_the_book(void)
      * an error, which is what the first version of book_build did. */
     {
         noun line    = f1(1, A(42));
-        noun log     = A(0);
         noun last    = A(7);
+        /* One entry, so that the addresses *into* the log have something to name.
+         * An empty log is the atom 0 and every address below it crashes, which
+         * makes a test of them pass or fail for the wrong reason.  The entry's
+         * answer is the last answer, as it is in a real session. */
+        noun entry   = C(line, C(last, A(0)));
+        noun log     = C(entry, A(0));
         noun count   = A(2);
         noun session = C(log, C(last, C(count, A(0))));
         noun subject = C(line, session);
@@ -412,6 +417,103 @@ static void test_the_book(void)
         expect_true("its count is at /30",       noun_equal(noun_slot(subject, 30), count));
         expect_true("and /5 is the line's tail, not the log",
                     noun_equal(noun_slot(subject, 5), noun_tail(line)));
+
+        /* There are two subjects, and they are not the same noun, which is the
+         * trap this whole block exists to close.  The book is run on
+         * [line session], and its own addresses (the AX_ constants in book.c) are
+         * addresses in that.  A line the user typed is run on the session alone,
+         * which is why the addresses in the README are different numbers for
+         * what looks like the same thing.  Both are below, from the same nouns,
+         * because a reader who has only got one of them will get the other one
+         * wrong -- and get it wrong silently, since a wrong address here often
+         * names a real noun rather than crashing. */
+        {
+            /* Into the log, from the book's own subject.  One step down from an
+             * address a is 2a for the head and 2a + 1 for the tail, so from the
+             * log at /6 the newest entry is at /12, its line at /24 and that
+             * entry's answer at /50. */
+            expect_true("the newest entry is at /12 of the book subject",
+                        noun_equal(noun_slot(subject, 12), entry));
+            expect_true("the newest line is at /24 of the book subject",
+                        noun_equal(noun_slot(subject, 24), line));
+            expect_true("the newest answer is at /50 of the book subject",
+                        noun_equal(noun_slot(subject, 50), last));
+
+            /* And the same nouns seen from the session, which is the subject a
+             * typed line actually gets.  The line is no longer in the way, so
+             * every address is smaller: /6 is the last answer rather than the
+             * log, /14 the count rather than the last answer, and the newest
+             * line and its answer are at /8 and /18.  These four are the
+             * formulas the README documents, so they are pinned here. */
+            expect_true("in the session, /2 is the log",
+                        noun_equal(noun_slot(session, 2), log));
+            expect_true("in the session, /6 is the last answer",
+                        noun_equal(noun_slot(session, 6), last));
+            expect_true("in the session, /8 is the newest line, not the entry",
+                        noun_equal(noun_slot(session, 8), line));
+            expect_true("in the session, /14 is the count",
+                        noun_equal(noun_slot(session, 14), count));
+            expect_true("in the session, /18 is the newest answer",
+                        noun_equal(noun_slot(session, 18), last));
+
+            /* The book really is run on [line session], so the two subjects are
+             * genuinely different nouns and not two names for one thing. */
+            expect_true("the book's subject and the session are different nouns",
+                        !noun_equal(subject, session));
+        }
+
+        /* The shift for a subject with one more value pushed on the front, which
+         * is how =+ is compiled: opcode 8 conses the value on and runs the
+         * second argument there.  A tree address is a leading 1 and then a
+         * path, so what moves is the *path* rather than the number -- it gains
+         * one step at the front, and the address becomes 1, that step, then the
+         * old path.  /2 becomes /6, /6 becomes /14, /30 becomes /62.
+         *
+         * Those four are also what 2a + 2 gives, and 2a + 2 is wrong for every
+         * other address: /8 goes to /24, /18 to /50, and the whole old subject
+         * to /3.  The four that agree are the four this file already named, so
+         * the arithmetic-looking rule is untested where it matters -- which is
+         * how the host compiler got it wrong, and why the addresses below were
+         * chosen rather than derived.  Measured by evaluating through opcode 8
+         * rather than derived, because the compiler's whole subject arithmetic
+         * rests on this one table. */
+        {
+            /* Four that 2a + 2 agrees with: /2 becomes /6, /6 becomes /14, /14
+             * becomes /30 and /30 becomes /62. */
+            static const u64 old_ax[] = {2, 6, 14, 30};
+            static const u64 new_ax[] = {6, 14, 30, 62};
+            for (unsigned i = 0; i < sizeof old_ax / sizeof old_ax[0]; i++) {
+                noun f = f2(8, f1(1, A(99)), f1(0, A(new_ax[i])));
+                expect_noun("a push on the front shifts an address by one step",
+                            subject, f, noun_slot(subject, old_ax[i]));
+            }
+
+            /* And three that 2a + 2 gets wrong, which is the point of writing
+             * the rule out: /8 becomes /24 and not /18, the whole subject
+             * becomes /3 and not /2, and /3 becomes /7 and not /8.  These are
+             * measured on the *session* rather than on the book's subject,
+             * because a session's /8 is the newest line while the book's /8 is
+             * two steps inside one -- a subject where the address cannot be read
+             * at all, which is its own kind of answer and is why the two
+             * subjects are named apart everywhere in this file. */
+            {
+                static const u64 s_old[] = {2, 6, 8, 14, 1, 3};
+                static const u64 s_new[] = {6, 14, 24, 30, 3, 7};
+                for (unsigned i = 0; i < sizeof s_old / sizeof s_old[0]; i++) {
+                    noun f = f2(8, f1(1, A(99)), f1(0, A(s_new[i])));
+                    expect_noun("a push on the front shifts an address by one step",
+                                session, f, noun_slot(session, s_old[i]));
+                }
+            }
+            /* And the pushed value itself is at /2, which is where a subject's
+             * head is, so =+ binds at /2 and the old subject is still whole at
+             * /1. */
+            expect_noun("the pushed value is at /2 of the new subject",
+                        subject, f2(8, f1(1, A(99)), f1(0, A(2))), A(99));
+            expect_noun("and /1 of the new subject is the cell of both",
+                        subject, f2(8, f1(1, A(99)), f1(0, A(1))),
+                        C(A(99), subject));
+        }
     }
 
     /* A fresh session is [0 0 0]: no log, no last answer, nothing run.  As a
