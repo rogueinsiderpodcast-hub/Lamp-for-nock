@@ -26,7 +26,8 @@ KERNEL  := $(BUILD)/boot.elf
 IMAGE   := $(BUILD)/boot.bin
 
 C_SRCS  := kernel/serial.c kernel/memory.c kernel/noun.c kernel/nock.c \
-           kernel/primitives.c kernel/main.c tests/nock-tests.c
+           kernel/primitives.c kernel/guestbook.c kernel/main.c \
+           tests/nock-tests.c
 ASM_SRCS := boot/boot.S
 OBJS    := $(patsubst %.c,$(BUILD)/%.o,$(C_SRCS)) \
            $(patsubst %.S,$(BUILD)/%.o,$(ASM_SRCS))
@@ -45,14 +46,22 @@ all: $(KERNEL)
 run: $(KERNEL)
 	$(QEMU) -kernel $(KERNEL)
 
+# The guest book reads bytes until it sees Ctrl-D, so a test run has to supply
+# one.  Feeding a real formula and checking the answer is in the output makes
+# `make test` cover the whole path -- build, boot, self-test, read, evaluate,
+# print, exit -- rather than stopping at the self-test.  The exit status still
+# comes from the isa-debug-exit device inside the guest, never from grep.
 test: $(KERNEL)
-	@$(QEMU) -kernel $(KERNEL); status=$$?; \
-	if [ $$status -eq 1 ]; then \
+	@printf '[1 42]\n\004' | $(QEMU) -kernel $(KERNEL) > $(BUILD)/test.log 2>&1; \
+	status=$$?; \
+	if [ $$status -eq 1 ] && grep -q 'LAMP: LIT' $(BUILD)/test.log; then \
 	    echo "make test: the machine halted cleanly and every check passed"; \
 	elif [ $$status -eq 3 ]; then \
-	    echo "make test: FAILED -- the machine reported failing checks"; exit 1; \
+	    echo "make test: FAILED -- the machine reported failing checks"; \
+	    sed -n '/== self-test/,/== guest book/p' $(BUILD)/test.log; exit 1; \
 	else \
-	    echo "make test: FAILED -- qemu exited with $$status (expected 1 or 3)"; exit 1; \
+	    echo "make test: FAILED -- qemu exited with $$status (expected 1 or 3)"; \
+	    cat $(BUILD)/test.log; exit 1; \
 	fi
 
 debug: $(KERNEL)

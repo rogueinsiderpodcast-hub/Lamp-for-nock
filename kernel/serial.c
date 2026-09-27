@@ -4,6 +4,9 @@
  * ones: QEMU wires the same 0x3F8 UART into `isa-serial` on the `pc` machine.
  * No interrupts, no FIFO juggling, no baud rate negotiation beyond "make it
  * 115200 8N1" -- a character at a time, polled.
+ *
+ * Both directions are here because Step 2 needs them: this is the machine's
+ * entire user interface, in and out, for as long as it lives.
  */
 
 #include "kernel.h"
@@ -44,7 +47,23 @@ void serial_init(void)
     outb(COM1 + REG_DIVISOR_LO, DIVISOR & 0xFF);
     outb(COM1 + REG_DIVISOR_HI, (DIVISOR >> 8) & 0xFF);
     outb(COM1 + REG_LINE_CTRL,   0x03);  /* DLAB off, 8 data bits, no parity, 1 stop */
-    outb(COM1 + REG_FIFO_CTRL,  0xC7);  /* enable + clear FIFOs, 14-byte trigger */
+
+    /* The receive and transmit FIFOs are left switched off, and this is a
+     * measured choice rather than a tidy one.
+     *
+     * QEMU has already buffered the first byte of a session by the time the
+     * kernel gets here -- a pipe delivers every byte at once -- and QEMU
+     * discards whatever it is holding whenever the FIFO is enabled, no matter
+     * which clear bits are set.  Enabling it therefore costs the first byte of
+     * every session, whether the machine is being typed at or fed a script.
+     * Measured on QEMU 11.1: 0xC1, 0xC7, 0x01 and 0x00 were tried, and only
+     * 0x00 kept the first byte.
+     *
+     * Nothing is lost by it.  A machine that reads one byte at a time has no
+     * use for a 16-byte FIFO; the cost is that QEMU can only offer one byte
+     * per read, which at 115200 baud is not a limit anything here can feel. */
+    outb(COM1 + REG_FIFO_CTRL,  0x00);  /* no interrupts from the FIFO either */
+
     outb(COM1 + REG_MODEM_CTRL, 0x03);  /* DTR | RTS */
 }
 
@@ -53,6 +72,16 @@ void serial_putc(char c)
     while ((inb(COM1 + REG_LINE_STATUS) & LSR_THR_EMPTY) == 0)
         ;
     outb(COM1 + REG_DATA, (u8)c);
+}
+
+/* One byte in, blocking until the UART has one.  This is the only place the
+ * machine ever waits for anything, and it is why there are no interrupts and
+ * no scheduler: there is exactly one thing to wait for. */
+u8 serial_getc(void)
+{
+    while ((inb(COM1 + REG_LINE_STATUS) & LSR_DATA_READY) == 0)
+        ;
+    return inb(COM1 + REG_DATA);
 }
 
 static void serial_put_raw(const char *s, u64 len)

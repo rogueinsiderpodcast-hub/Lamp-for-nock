@@ -127,6 +127,8 @@ void kmain(u64 boot_params_phys)
 
     /* Build a small subject so the noun layer is warm before the tests run. */
     noun warmup = noun_cons(noun_atom(1), noun_atom(2));
+    (void)warmup;
+
 
     rule("self-test");
     int failures = nock_tests_run();
@@ -141,7 +143,8 @@ void kmain(u64 boot_params_phys)
     step(prim_count() == 20, "twenty native primitives, nothing else");
     step(nock_jet_fires() > 0, "a native jet ran from a hint");
     step(failures == 0, "every self-test check passed");
-    (void)warmup;
+
+    int lit = failures == 0 && checklist_pass == checklist_total;
 
     serial_put_nl();
     serial_puts("  checklist: ");
@@ -149,13 +152,30 @@ void kmain(u64 boot_params_phys)
     serial_puts(" of ");
     serial_put_dec((u64)checklist_total);
     serial_puts(" done\n");
-    serial_puts(failures == 0 && checklist_pass == checklist_total
-                    ? "  LAMP: LIT\n"
-                    : "  LAMP: DARK\n");
+    serial_puts(lit ? "  LAMP: LIT\n" : "  LAMP: DARK\n");
+
+    /* Step 2.  The verdict is printed before the guest book opens, because the
+     * guest book is built out of the interpreter the self-test has just tested.
+     * A machine that failed should say so and stop, rather than accept input
+     * it cannot evaluate.
+     *
+     * The mode is not a mode.  The guest book is simply what the machine does
+     * next, and the only way to leave it is to feed it Ctrl-D -- so `make
+     * test` pipes one and `make run` waits for a person to type one.  There is
+     * one build and one binary, and nothing has to know which is which. */
+    if (!lit) {
+        serial_put_nl();
+        serial_puts("Not opening the guest book: something above is not true.\n");
+        serial_put_nl();
+        debug_exit(1);
+        return;
+    }
+
+    gb_run();
 
     serial_put_nl();
     serial_puts("Halting.  The machine is finished; nothing is left running.");
     serial_put_nl();
 
-    debug_exit(failures == 0 && checklist_pass == checklist_total ? 0 : 1);
+    debug_exit(0);
 }

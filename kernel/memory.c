@@ -59,6 +59,7 @@ static u64 heap_end;
 static u64 heap_next;
 static u64 largest_free;
 
+
 /* Number of map entries the parser could not make sense of.  Should be zero;
  * a non-zero count is printed so a bad layout cannot pass unnoticed. */
 static u64 map_unreadable;
@@ -68,6 +69,12 @@ u64 mem_heap_end(void)   { return heap_end; }
 u64 mem_heap_used(void)  { return heap_next - heap_start; }
 u64 mem_largest_free_region(void) { return largest_free; }
 u64 mem_map_unreadable(void) { return map_unreadable; }
+
+/* Does the boot command line contain this word?  A substring search, because
+ * that is the whole of the grammar: the command line is a bag of flags and
+ * there is exactly one we care about.  A missing command line, or a needle
+ * longer than the command line, is simply a no rather than an error: "not
+ * asked for" and "asked for and absent" want the same answer here. */
 
 /* Read the boot loader's structures byte by byte.  They are normally aligned,
  * but this costs nothing and it means the kernel never depends on being able

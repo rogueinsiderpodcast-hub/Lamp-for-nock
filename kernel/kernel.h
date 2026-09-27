@@ -36,10 +36,15 @@ void machine_reset_error(void);
 
 void serial_init(void);
 void serial_putc(char c);
+u8   serial_getc(void);
 void serial_puts(const char *s);
 void serial_put_dec(u64 v);
 void serial_put_hex(u64 v);
 void serial_put_nl(void);
+
+/* --- guestbook.c -------------------------------------------------------- */
+
+void gb_run(void);
 
 /* --- memory.c ---------------------------------------------------------- */
 

@@ -343,19 +343,111 @@ one in to cross-check would add more unaudited code than the interpreter itself.
 
 **Consequence, stated plainly:** if the reading of the rules in items 6 and 7 is
 wrong, this machine is wrong in the same way, and its tests will not notice,
-because the tests were written from the same reading. The mitigations are that
-the reading comes from two independent sources that agree, that the two
-ambiguous rules are flagged here, and that verifying against `vere` is a small,
-well-defined task for the next step.
+because the tests were written from the same reading.
+
+**That is no longer hypothetical, and it is worth reading how it went.** Getting
+the machine green required going outside the test suite for the first time: the
+two interpreter bugs Step 1 ended on -- `arg()` never advancing its index, and
+opcode 8 evaluating `c` when the rule says it is the formula -- were both found
+by putting `vere/doc/spec/nock/4.txt` beside the code. The tests were satisfied
+by the wrong behaviour, and no arrangement of more tests written from the same
+reading would have caught either.
+
+So the mitigation is not "write more tests". It is that a shared *misreading* is
+invisible to a suite derived from it, and the only defence is an authority the
+suite was not derived from. The rule already in this file -- that a fix needing
+a change in `kernel/` means the interpreter and this document disagree, and has
+to be argued rather than assumed -- is what caught it, and it exists because it
+was written before it was needed.
+
 
 ---
 
 ## 12. Scope: what is deliberately not here
 
-No disk, no filesystem, no persistence across power cycles, no network, no input
-device, no Hoon compiler, no Hoon standard library, no scheduler, no processes,
-no memory protection, no GPU, no framebuffer, no audio, no Bluetooth, no package
-manager, no remote update path, no user accounts, no clock.
+No disk, no filesystem, no persistence across power cycles, no network, no
+keyboard or mouse, no Hoon compiler, no Hoon standard library, no scheduler, no
+processes, no memory protection, no GPU, no framebuffer, no audio, no Bluetooth,
+no package manager, no remote update path, no user accounts, no clock.
 
-The machine boots, evaluates Nock, tests itself, prints the result and halts.
-That is Step 1 in full.
+The machine boots, evaluates Nock, tests itself, prints the result, and halts.
+That is Step 1 in full. Step 2 adds input, which means the serial port is now a
+device the machine both reads and writes -- and nothing else, so "no input
+device" above means no input device *other than* the UART.
+
+---
+
+## 13. The serial line is the entire user interface, in both directions
+
+**Decided:** the 16550 is read as well as written, still one byte at a time,
+still polled, still with no interrupts. A line of printable ASCII ends on enter;
+backspace deletes; Ctrl-D leaves. Nothing else is a key.
+
+**Why:** this is the only piece of hardware the machine is allowed (item 1), and
+it is a bidirectional wire. A machine that can only speak cannot be talked to,
+and adding a second input path would break item 1 to no purpose. The cost of
+polling is that the machine is either printing or waiting and never both, which
+matters not at all at 115200 baud with one user.
+
+**Cost:** one `serial_getc()`, a bounded line buffer, and a loop that waits on
+`LSR_DATA_READY`. That loop is the only place in the machine that can block.
+
+**Proven:** the whole path, from a pipe on the host to bytes in the guest's
+buffer and back, by `make test`, which feeds `[1 42]` in and reads the answer
+back out of the log. The interactive loop has no test of its own and is not
+meant to: it is ten lines of hardware waiting, wrapped around logic that is
+tested without it.
+
+---
+
+## 14. One binary; the guest book is entered by feeding it a byte
+
+**Decided:** there is no mode flag. The machine runs its self-test, prints its
+verdict, and then opens the guest book, which reads bytes until it is fed
+Ctrl-D. `make test` pipes `[1 42]\n\004`; `make run` waits for a person.
+
+**Why:** the first attempt was a boot argument, so `make test` would pass
+nothing and `make run` would pass `repl`. That does not work, and finding out
+why was worth the detour: **QEMU does not fill in a command line for a PVH
+guest.** `hvm_start_info` has `cmdline_paddr` and `cmdline_len` at offsets 24
+and 32, the machine parses the same structure for the memory map, and the fields
+arrive as zero. So the flag had to be delivered some other way -- a second build
+variant, or the mode fixed at compile time -- and both of those put a fact
+about *how the machine was started* into something the machine cannot see.
+
+Feeding a byte has none of that problem. The machine is always in the same state
+before input arrives; a test is a script rather than a different binary; and
+`make test` ends up covering the whole path -- build, boot, self-test, read,
+evaluate, print, exit -- instead of stopping at the self-test.
+
+**Consequence, accepted:** a test run now depends on QEMU delivering piped
+stdin to the UART. Measured working on QEMU 11.1, and it is the same code path
+in every other respect, but it is a dependency that did not exist before and it
+would hang rather than fail if it broke.
+
+**Correction to item 4:** that entry said nothing outside the memory map would
+ever be used from the start-info structure, and said so with some confidence.
+The command line turned out to be exactly the thing that wanted to be used, and
+exactly the thing PVH does not deliver. The entry was right about the shape of
+the interface and wrong about how much of it exists.
+
+---
+
+## 15. The UART FIFOs are left switched off
+
+**Decided:** `serial_init` writes `0x00` to the FIFO control register. No
+receive FIFO, no transmit FIFO, 14-byte trigger or otherwise.
+
+**Why:** measured, not tidiness. QEMU has already buffered the first byte of a
+session by the time the kernel runs -- a pipe delivers every byte at once -- and
+QEMU discards whatever it is holding at the moment the FIFO is enabled,
+whatever the clear bits are set to. Enabling it therefore costs the first byte
+of every session, whether the machine is being typed at or fed a script. All
+four control values were tried: `0xC1`, `0xC7`, `0x01` and `0x00`, and the
+first three each lost the leading `A` of `ABCDE` while `0x00` did not.
+
+**Cost:** QEMU can offer one byte per read, so a piped script transfers at the
+speed of a serial port rather than a socket. At 115200 baud that is not a limit
+anything here can feel, and a 16-byte FIFO would have bought nothing for a
+machine that reads one byte at a time and then stops.
+
