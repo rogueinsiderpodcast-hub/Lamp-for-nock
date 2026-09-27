@@ -24,16 +24,16 @@ No operating system, no libc, no bootloader, no disk, no network. The only piece
 of hardware it touches is the 16550 serial port at 0x3f8, polled, one byte at a
 time.
 
-The whole machine is 2,339 lines, counting non-blank lines with `/* */` and
-`//` comments stripped: 133 of assembly to reach long mode, 1,272 of C, 819 of
-tests, and 115 of headers. `make lines` runs the count, so the figure is a
+The whole machine is 2,402 lines, counting non-blank lines with `/* */` and
+`//` comments stripped: 133 of assembly to reach long mode, 1,302 of C, 850 of
+tests, and 117 of headers. `make lines` runs the count, so the figure is a
 command and not a claim. (Stated that way because the previous figure, 1,991,
 could not be reproduced by any counting method and was therefore not worth
 carrying, and because a number nobody can re-derive is a number nobody should
 trust: the method is `tools/lines.awk`, and it is awk because a `/*` comment can
 open on one line and close on another, which any per-line filter gets wrong.
-The 819 of tests are 249 checks over the noun layer, the interpreter, the
-primitives, the reader and the book; the host compiler in `tools/hoon.c` is 605
+The 850 of tests are 260 checks over the noun layer, the interpreter, the
+primitives, the reader and the book; the host compiler in `tools/hoon.c` is 554
 lines and is *not* in this figure, because it is not part of the machine — it is
 the thing that feeds it, and neither is `tools/jet-proofs.c`.) It
 implements Nock 4K — all twelve opcodes — over a noun representation where
@@ -161,7 +161,9 @@ This matters more than the feature list, so it is stated plainly.
   evaluation that edited it, and the arena only grows
 - determinism: the same subject and formula give the same answer twice
 - a jet firing from a dynamic hint, and the answer being identical with the
-  hook enabled and disabled
+  hook enabled and disabled — plus that the native was handed the two numbers the
+  formula wrote, that a hint of any other shape is not jetted at all, and that a
+  native which stops backs the hint out instead of stopping the machine
 - two of the twenty primitives against their Nock definitions, in `make proofs`:
   `+inc` and `+eq` are read by the machine's own reader, printed back by the
   machine's own printer, run by the machine's own interpreter, and required to

@@ -75,10 +75,17 @@ static u64 p_and(u64 a, u64 b) { return a & b; }
 static u64 p_or(u64 a, u64 b)  { return a | b; }
 static u64 p_xor(u64 a, u64 b) { return a ^ b; }
 
+/* A shift amount is a bit position, and a 63-bit atom has positions 0 to 62.
+ * The guard is also what keeps the checks below out of undefined behaviour: C
+ * leaves a shift of 64 or more undefined, so an unbounded amount would be a
+ * crash of a different kind.  Note that this is about the amount and not the
+ * result -- 1 +rsh 63 is 0, which is in range, and is still refused.  A domain
+ * restriction, not an overflow check; +lsh's result check is the overflow one. */
 static u64 p_lsh(u64 a, u64 b)
 {
     if (b > 62) {
-        machine_crash("+lsh: shift of 63 or more leaves the atom range");
+        machine_crash("+lsh: a shift of 63 or more is not a position in a "
+                      "63-bit atom");
         return 0;
     }
     if (a > (NOUN_ATOM_MAX >> b)) {
@@ -91,7 +98,8 @@ static u64 p_lsh(u64 a, u64 b)
 static u64 p_rsh(u64 a, u64 b)
 {
     if (b > 62) {
-        machine_crash("+rsh: shift of 63 or more leaves the atom range");
+        machine_crash("+rsh: a shift of 63 or more is not a position in a "
+                      "63-bit atom");
         return 0;
     }
     return a >> b;

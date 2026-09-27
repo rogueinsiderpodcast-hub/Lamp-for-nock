@@ -99,7 +99,9 @@ int         nock_run(noun subject, noun formula, noun *out);
 const char *nock_crash_reason(void);
 u64         nock_steps_used(void);
 u64         nock_jet_fires(void);
+u64         nock_jet_declines(void);
 void        nock_jet_hooks(int enable);
+void        nock_jet_last(u64 *index, u64 *a, u64 *b, u64 *result);
 u64         nock_opcode(noun formula);   /* 0..11, or NOCK_NO_OPCODE */
 #define NOCK_NO_OPCODE 0xFFFFFFFFFFFFFFFFULL
 
@@ -158,9 +160,12 @@ void gb_run(void);
  *
  *     [11 [<atom: primitive index> <formula: argument>] <real formula>]
  *
- * The interpreter evaluates <formula>, hands the result to the primitive and
- * throws the result away; the hint's answer is the real formula.  Hints are
- * semantically transparent, which is exactly what the tests check.
+ * The argument is an atom, or a pair of two atoms: the one operand, or the two
+ * of them.  The interpreter hands them to the primitive and throws the result
+ * away; the hint's answer is the real formula.  Hints are semantically
+ * transparent, which is exactly what the tests check.  An argument of any other
+ * shape is not ours, and is not jetted at all -- see jet_maybe() in nock.c for
+ * why that has to be so, and for what happens when the native stops.
  *
  * Every primitive announces itself on the serial line so that a jet firing is
  * visible.  Real Urbit jets are silent; this is a Step 1 debugging choice. */

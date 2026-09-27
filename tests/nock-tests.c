@@ -223,13 +223,13 @@ static void test_jets(void)
 {
     group("jets");
 
-    noun s       = d2(A(7), A(8));
-    u64  before  = nock_jet_fires();
+    noun s      = d2(A(7), A(8));
+    u64  before = nock_jet_fires();
 
-    /* The argument formula is the constant [2 3], so the primitive is called
-     * with 2 and 3 and prints +add(2, 3) = 5.  The real formula reads
-     * address 2 of the subject, which is 7. */
-    noun formula = f2(11, C(A(0), f1(1, d2(A(2), A(3)))), f1(0, A(2)));
+    /* The argument formula is the constant [2 3] -- a pair of two atoms, which
+     * is the shape the convention asks for -- so the primitive is called with 2
+     * and 3.  The real formula reads address 2 of the subject, which is 7. */
+    noun formula = f2(11, C(A(0), f1(1, C(A(2), A(3)))), f1(0, A(2)));
 
     nock_jet_hooks(0);
     noun quiet = 0;
@@ -243,6 +243,47 @@ static void test_jets(void)
     check(nock_jet_fires() == before + 1, "exactly one primitive ran, so the jet fired");
     check(noun_equal(quiet, loud) && noun_equal(loud, A(7)),
           "the jet does not change the answer, which is the whole point of a hint");
+
+    /* Counting firings is not a test of the jet.  It has to be the numbers the
+     * formula wrote, going in, and the sum of them, coming out: a jet reading
+     * the right answer out of the wrong operand would pass every check above. */
+    u64 idx = 0, ja = 0, jb = 0, jr = 0;
+    nock_jet_last(&idx, &ja, &jb, &jr);
+    check(prim_index("+add") >= 0 && idx == (u64)prim_index("+add")
+          && ja == 2 && jb == 3 && jr == 5,
+          "the native was handed the two numbers written and answered 5");
+
+    /* An argument that is not a pair of numbers is not ours, and must not be
+     * jetted.  Read as a pair this one is ([1 2], 0) -- a cell where a number
+     * should be, which atom_val() reports as an arena index -- so +div would be
+     * called as (0, 0) and stop the machine over a division nothing asked for,
+     * with the real formula still to answer. */
+    noun bomb = f2(11, C(A(3), f1(1, C(C(A(1), A(2)), A(0)))), f1(0, A(2)));
+    noun out  = 0;
+    int rc_bomb = nock_run(s, bomb, &out);
+    check(rc_bomb == NOCK_OK && noun_equal(out, A(7))
+          && nock_jet_fires() == before + 1,
+          "an argument that is not a pair of numbers is left to the real formula");
+
+    /* A native that stops is a hint that was wrong, not a fault in the program
+     * being run.  +inc cannot increment 2^63 - 1, and the real formula was a
+     * moment from answering 7 all the same, so the probe backs out and the
+     * answer with hooks off is the answer here too. */
+    int inc = prim_index("+inc");
+    check(inc >= 0, "+inc is in the bank, to be hinted at below");
+
+    if (inc >= 0) {
+        u64 declined = nock_jet_declines();
+        noun over = f2(11, C(A((u64)inc), f1(1, C(A(9223372036854775807ULL), A(0)))),
+                       f1(0, A(2)));
+        noun ovr = 0;
+        int rc_over = nock_run(s, over, &ovr);
+        check(rc_over == NOCK_OK && noun_equal(ovr, A(7))
+              && nock_jet_declines() == declined + 1
+              && nock_jet_fires() == before + 1,
+              "a native that stops backs the hint out instead of stopping the machine");
+    }
+
     check(prim_count() == 20, "the native bank holds twenty primitives");
     check(prim_index("+add") == 0, "+add is primitive 0");
     check(prim_index("+nosuch") < 0, "an unknown primitive name is not found");
@@ -342,6 +383,15 @@ static void test_primitives(void)
     expect_prim("+rsh", 1024, 10, 1);
     expect_prim("+rsh", 7, 1, 3);
 
+    /* 62 is the last bit position in a 63-bit atom, and it is the last answer
+     * either shift gives: 2^62 is in range, 2^62 >> 62 is 0.  Pinning the
+     * boundary from the answering side is what says 63 is a domain limit
+     * rather than an accident. */
+    expect_prim("+lsh", 1, 62, 4611686018427387904ULL);
+    expect_prim("+lsh", 0, 62, 0);
+    expect_prim("+rsh", 4611686018427387904ULL, 62, 1);
+    expect_prim("+rsh", 1, 62, 0);
+
     expect_prim("+inc", 0, 0, 1);
     expect_prim("+inc", 41, 0, 42);
     expect_prim("+dec", 1, 0, 0);
@@ -362,6 +412,11 @@ static void test_primitives(void)
     expect_prim_crash("+lsh", 1, 63);
     expect_prim_crash("+lsh", NOUN_ATOM_MAX, 1);
     expect_prim_crash("+rsh", 1, 63);
+    /* What the guard is really for: C leaves a shift of 64 or more undefined,
+     * so an unbounded amount is a crash of a different kind entirely. */
+    expect_prim_crash("+lsh", 1, 64);
+    expect_prim_crash("+rsh", 1, 100);
+    expect_prim_crash("+lsh", 0, 999);
 }
 
 /* --- solid state ------------------------------------------------------- */

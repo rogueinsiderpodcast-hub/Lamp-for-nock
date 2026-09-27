@@ -44,6 +44,32 @@ The count is 139 rather than 140 because one test was deleted rather than fixed
 — see bug 3 below. It asserted both sides of a contradiction, so there was
 nothing there to repair.
 
+### A bug in Step 1 that eleven steps of writing did not find
+
+Found by going back over Step 1 to look for problems rather than to add
+anything, and worth setting down because of what it says about the rest.
+
+The jet test built its hint's argument as the *list* `[2 [3 0]]` while the
+interpreter read a *pair* `[2 3]`, so the native was handed `+add(2, 4) = 6`
+and answered with it on the serial line, one line under a comment saying the
+test was about `+add(2, 3) = 5`. It passed. The test checked that a primitive
+ran, that the answer was unchanged, and not one thing about the numbers that
+went in or came out.
+
+What made it survivable is the shape of the assertion, not the arithmetic: every
+other check in the suite asks for a value, and that one asked for an *event*. A
+jet reading the right answer out of the wrong operand, or the wrong answer out
+of the right operand, satisfies every check that only looks at the answer —
+which is all the checks that looked. Two rules came out of it: a hint is jetted
+only when its argument is shaped like operands, and a native that stops backs
+the hint out rather than taking the machine down over a claim that turned out
+to be wrong. Both are in `decisions.md` item 10, and removing either one now
+fails a check.
+
+The lesson carried forward is in the twenty-natives work: a suite that counts
+events and a suite that checks values are not the same suite, and the second is
+what catches a machine that computes the wrong thing correctly.
+
 ## How the red machine became green
 
 The first run of the self-test was 140 checks and 37 failing. Getting to zero
@@ -146,7 +172,7 @@ could be read:
 
 ## Where Step 2 stands
 
-**Done.** The self-test is 249 checks, 0 failing, `LAMP: LIT`, checklist 11 of 11
+**Done.** The self-test is 260 checks, 0 failing, `LAMP: LIT`, checklist 11 of 11
 -- the eleventh being the new one, that a formula typed at the machine runs and
 what it leaves behind matters.  It was checked by breaking the count increment
 and watching the lamp go dark, because a checklist item that cannot fail is a

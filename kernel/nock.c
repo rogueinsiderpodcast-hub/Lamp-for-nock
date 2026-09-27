@@ -46,6 +46,12 @@ static u64 steps_used;
 static u64 call_depth;
 static int  jet_hooks_enabled;
 static u64 jet_fires;
+static u64 jet_declines;
+
+/* What the last fired jet handed to the native, and what came back.  A jet that
+ * runs on the wrong numbers still fires and still leaves the answer alone, so
+ * counting firings is not a test of it; this is. */
+static u64 jet_last_index, jet_last_a, jet_last_b, jet_last_res;
 
 int         machine_err;
 const char *machine_err_msg = "";
@@ -81,10 +87,24 @@ void nock_init(u64 limit)
 {
     step_limit        = limit;
     jet_hooks_enabled = 1;
+    jet_declines      = 0;
+    jet_last_index    = 0;
+    jet_last_a        = 0;
+    jet_last_b        = 0;
+    jet_last_res      = 0;
 }
 
 u64  nock_steps_used(void) { return steps_used; }
-u64  nock_jet_fires(void)  { return jet_fires; }
+u64  nock_jet_fires(void)    { return jet_fires; }
+u64  nock_jet_declines(void) { return jet_declines; }
+
+void nock_jet_last(u64 *index, u64 *a, u64 *b, u64 *result)
+{
+    if (index)  *index  = jet_last_index;
+    if (a)      *a      = jet_last_a;
+    if (b)      *b      = jet_last_b;
+    if (result) *result = jet_last_res;
+}
 void nock_jet_hooks(int enable) { jet_hooks_enabled = enable; }
 
 u64 nock_opcode(noun formula)
@@ -151,16 +171,48 @@ static void jet_maybe(noun hint_head, noun hint_product)
     if (entry->fn == NULL)
         return;
 
+    /* The argument is ours only when it is shaped like operands: an atom for a
+     * primitive of one, a pair of two atoms for a primitive of two.  A cell
+     * whose halves are cells is not a pair of numbers, because atom_val() on a
+     * cell hands back an arena index rather than the value the formula wrote.
+     * Reading one would give the native a number nobody wrote, and a primitive
+     * that stops on it -- +div on a zero nobody asked to divide by -- would take
+     * the machine down while the real formula is still waiting to answer.  A
+     * hint is only ours if it is our shape, so anything else is not ours to
+     * jet, and the real formula answers. */
     u64 a = 0, b = 0;
     if (noun_is_cell(hint_product)) {
+        if (!noun_is_atom(noun_head(hint_product))
+            || !noun_is_atom(noun_tail(hint_product)))
+            return;
         a = noun_atom_val(noun_head(hint_product));
         b = noun_atom_val(noun_tail(hint_product));
     } else {
         a = noun_atom_val(hint_product);
     }
 
+    /* The native is a probe and the real formula is the authority.  A hint
+     * claims a computation is available here; if the native stops -- an
+     * operand that overflows, a division by a zero -- then the claim was
+     * wrong, and letting the probe's crash stand would take down a program
+     * whose real formula was a moment from answering.  The answer with hooks
+     * off is the one that has to hold, so a failed probe backs out.  The
+     * primitives compute in registers and allocate nothing, so backing out is
+     * clearing the error.  A hint that turns out not to apply is ordinary
+     * rather than faulty, so it is counted and not printed. */
+    machine_reset_error();
     u64 result = prim_call((int)index, a, b);
+    if (machine_err) {
+        jet_declines++;
+        machine_reset_error();
+        return;
+    }
+
     jet_fires++;
+    jet_last_index = (u64)index;
+    jet_last_a     = a;
+    jet_last_b     = b;
+    jet_last_res   = result;
 
     if (entry->verbose) {
         serial_puts("      jet  ");

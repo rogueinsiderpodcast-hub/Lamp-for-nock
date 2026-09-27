@@ -256,6 +256,17 @@ The opcode-2 success case pins down that `c`'s *product* is the formula (it is
 given a constant formula and answers through it), and the 2-against-7 pair pins
 down the other half.
 
+**A known laxness, recorded because it was found while looking for something
+else.** A formula is checked for being a cell and for having the arguments an
+opcode reads, and it is *not* checked for being a list that ends in 0. So `[5 a
+b 0]` and `[5 a b 1]` are the same formula to this machine. That is not a wrong
+answer, because `arg()` walks to an argument by position and no opcode can
+distinguish the two, but it is an asymmetry: too short is a crash ("formula is
+missing arguments"), wrongly terminated is not. The check is left out on purpose
+— it would cost a test on every formula the machine evaluates, in the hottest
+loop there is, to reject a noun that would have been evaluated identically
+anyway. A deviance that cannot change an answer is recorded here instead.
+
 ---
 
 ## 8. A formula that reduces to itself is a crash, and the machine survives it
@@ -342,6 +353,20 @@ The interpreter evaluates the argument formula, hands the result to the native
 primitive, and throws the primitive's answer away. Every primitive announces
 itself and its result on the serial line.
 
+Two rules make that safe rather than merely intended, and both were added after
+the tests below turned out not to be testing it:
+
+- **The argument is an atom, or a pair of two atoms** -- the shape the convention
+  asks for, and nothing else is jetted at all. `noun_atom_val()` on a cell hands
+  back an arena index rather than the value a formula wrote, so a hint carrying
+  something else would hand the native a number nobody wrote.
+- **The native is a probe, and the real formula is the authority.** If the native
+  stops -- an operand that overflows, a division by a zero -- the claim the hint
+  made was wrong, and the probe backs out instead of stopping a program whose
+  real formula was a moment from answering. The primitives compute in registers
+  and allocate nothing, so backing out is clearing the error. A hint that turns
+  out not to apply is ordinary rather than faulty, so it is counted, not printed.
+
 **Why:** a dynamic hint is the one place in the Nock specification where an
 interpreter is explicitly permitted to do something extra — "a practical
 interpreter can do anything with discarded data, so long as the result it
@@ -355,7 +380,20 @@ constants. Ours is a plain array index. It is a demonstration that the mechanism
 works end to end, and it is labelled as ours everywhere it appears.
 
 **Proven:** the mechanism. A jet fires, a native function runs, and the
-evaluation's answer is bit-for-bit the same with hooks enabled and disabled.
+evaluation's answer is bit-for-bit the same with hooks enabled and disabled. A
+hint of the wrong shape does not jet, and a native that stops does not stop the
+machine.
+
+**Found by looking, and fixed:** the test that was supposed to check all of this
+built its argument as the *list* `[2 [3 0]]` while the interpreter read a *pair*
+`[2 3]`, so the native was handed `+add(2, 4) = 6` and the test's own comment
+claimed `+add(2, 3) = 5`. It passed anyway, because it checked that a primitive
+ran, that the answer was unchanged, and not one thing about the numbers that went
+in. Counting firings is not a test of a jet: a jet reading the right answer out of
+the wrong operand passes every check that only looks at the answer. The test now
+asks the interpreter what the native actually received, and asserts the two
+numbers written and the sum of them. Both rules above were added because removing
+either one makes a check fail.
 
 **Not proven:** that the jet mechanism can stand in for a *standard library*
 definition. Two of the twenty primitives now have Nock definitions and are proved
