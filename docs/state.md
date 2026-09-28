@@ -450,6 +450,18 @@ its own buffer, and rows move, so a core pushed into had a refusal that listed
 which is exactly why nothing failed. The rows carry their labels now, and the
 pushed core's addresses have value tests of their own.
 
+## ## Where the Nock definitions are, and are not
+
+The seventeen pending operations want proofs against Nock definitions, and the
+obvious place to look for an authoritative set is the evaluation corpus under
+`~/kev/evals/external`. It is not there. `scienthoon-v1` is support-ticket
+classification, `semif-v1` is evidence interpretation, `ekzhang-mmlupro-v1` is
+a bag of yes/no puzzles, and the one hit for "nock" anywhere in the corpus is
+the word "knockout". So the only Nock in the tree is `kernel/nock.c`, which is
+what every claim in this file has been checked against, and the arithmetic
+questions are not waiting on a definition to be found -- they are waiting on
+someone to write one, as item 23's `+add` was written rather than found.
+
 ## The questions waiting on the bridge
 
 Asked before the power went out, when the bridge was still a question. All three

@@ -346,7 +346,6 @@ static void shape_push(void)
     shape_len += 2;
     axis_set(&shape[0], 2, "the value just pushed on", 0);
     axis_set(&shape[1], 3, "the whole of the old subject", 0);
-    (void)0;
 }
 
 /* Two entries came on with the push -- the value at /2 and the old subject at
@@ -982,7 +981,19 @@ static noun emit(struct expr *e)
          * in the *outer* subject and its value is the formula, not a formula
          * written down.  Hence the usual spelling here is *(|(1 3) |(0 2)),
          * where the second | builds the bone [0 2 0].  nock.c's comment on
-         * opcode 2 says the same thing about the difference from opcode 8. */
+         * opcode 2 says the same thing about the difference from opcode 8.
+         *
+         * The second argument is a formula, so a number in that slot is the
+         * machine stopping with "a formula must be a cell, but this is an atom"
+         * on a noun the compiler wrote down itself.  A read is left alone: an
+         * address is checked for being there and not for what it holds, which is
+         * the line this language has drawn from the start, and a formula
+         * reached through a read is a formula like any other. */
+        if (e->arg[1]->kind == K_ATOM)
+            refuse("* runs its second argument as a formula, and a number is not "
+                   "one: the machine would stop with \"a formula must be a cell\" "
+                   "on a noun this compiler wrote down, which is the one kind of "
+                   "wrong answer it can see coming");
         return f2(2, emit(e->arg[0]), emit(e->arg[1]));
 
     case '|': {
@@ -1391,6 +1402,9 @@ static const struct {
       "/7 the arm and the end of the list /12 the first thing of the sample, which "
       "is a number here /14 the arm /26 the second thing of the sample, which is a "
       "number here" },
+    { "a number where * runs a formula",
+      "*(/2 2)",
+      "* runs its second argument as a formula, and a number is not one" },
     { "an address the session does not have", "/37",
       "are /2 the log /6 the last answer /8 the newest line /14 the count "
       "/18 that line's answer" },

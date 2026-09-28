@@ -113,8 +113,9 @@ Thirteen forms: an atom, `/axis`, a name, a list `[a b]`, `?(a)`, `=(a b)`,
 `=>` (push on, run there) and `?:(c t e)` (0 is true). On top of those, `=+(arm
 sample body)` builds a core: `[sample arm 0]`, the arm at `/6` whatever the
 sample is, the sample's things at `/4`, `/10`, `/22`, and a name in a body a
-read of that `/6`. That is enough to write a loop, and `make teach` runs one
-down the serial line and checks what the machine answers. `+(a b)` for anything
+read of that `/6`. That is enough to write a loop, and `make teach` sends eleven
+expressions down the serial line and checks the machine's own answers to all of
+them — seven of them cores, nested cores, a pushed core and two loops. `+(a b)` for anything
 but two literals is still refused by name, because no opcode in this machine adds
 two values it only has at run time. An address is checked against the subject
 the expression will be run on, so an address that is not there is refused by name

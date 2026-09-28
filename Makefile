@@ -164,21 +164,27 @@ proofs: $(PROOFS)
 # reader reads it, the guest's interpreter runs it, and the answer comes back.
 # Nothing here is a socket and nothing is a protocol.
 #
-# Five lines, and the answers are a claim about five lines of a session rather
-# than five independent answers.  Line 2 answering 2 means the count read at /14
+# Eleven lines, and the answers are a claim about eleven lines of a session
+# rather than eleven independent answers.  Line 2 answering 2 means the count read at /14
 # was 1, so line 1 was typed, read, run and remembered; line 4 answering 4 means
 # the count was 3, so all three of the lines before it were.  Line 3 answers 1
 # on its own, and is the only one that does not read the count -- the session
 # carrying is what proves it arrived.
 #
-# Line 5 is the loop, counting up to three and answering with the limit it was
-# given.  It is one line of source no matter how far it counts, and the machine
-# walks it at run time; on the host the same formula costs 17 steps and 7 nouns
-# per call, and a thousand calls fit inside the 10000-frame depth limit while ten
-# thousand do not.  See decisions.md item 24.
+# Lines 5 to 11 are cores, and each one is a claim about a different address: the
+# first and second things of a sample, a sample holding a read of the session, a
+# core inside a core, a core pushed into, a conditional reading the sample, and
+# two loops -- one of them counting up to three inside another core, answering
+# with the limit it was given.  The
+# loop is one line of source no matter how far it counts, and the machine walks
+# it at run time; on the host the same formula costs 17 steps and 7 nouns per
+# call, and a thousand calls fit inside the 10000-frame depth limit while ten
+# thousand do not.  See decisions.md item 24.  A line whose answer came out one
+# out is the failure this is here to catch: the compiler and the machine agreeing
+# about a number is the only thing that makes the numbers mean anything.
 teach: $(KERNEL) $(HOON)
 	@{ \
-	    printf '=>(/14 ?:(/2 1 2));=>(/14 ?:(/2 1 2));*(|(1 3) |(0 2));+(/14);=+(arm |(0 3) ?:(=(/4 /10) /10 ~(arm |(|(+(/4) /10) arm))))\n' \
+	    printf '=>(/14 ?:(/2 1 2));=>(/14 ?:(/2 1 2));*(|(1 3) |(0 2));+(/14);=+(arm |(0 3) ?:(=(/4 /10) /10 ~(arm |(|(+(/4) /10) arm))));=+(a |(7 0) /4);=+(a |(0 /14) /10);=+(a |(0 0) =+(b |(9 0) /4));=+(a |(0 9) =>(/10 /26));=+(a |(0 1) ?:(=(/4 /4) 4 5));=+(a |(0 0) =+(b |(0 2) ?:(=(/4 /10) 9 ~(b |(|(+(/4) /10) b)))))\n' \
 		| tr ';' '\n' \
 		| while read -r e; do ./$(HOON) "$$e" || exit 1; printf '\n'; done; \
 	    printf '\004'; \
@@ -189,7 +195,7 @@ teach: $(KERNEL) $(HOON)
 	    cat $(BUILD)/teach.log; exit 1; \
 	fi; \
 	i=1; failed=0; \
-	for want in 1 2 1 4 3; do \
+	for want in 1 2 1 4 3 7 6 9 9 4 9; do \
 	    if ! grep -q -- "  $$want  ($$i so far)" $(BUILD)/teach.log; then \
 	        echo "make teach: FAILED -- line $$i did not answer $$want"; \
 	        failed=1; \
@@ -199,7 +205,7 @@ teach: $(KERNEL) $(HOON)
 	if [ $$failed -ne 0 ]; then \
 	    sed -n '/guest book/,$$p' $(BUILD)/teach.log; exit 1; \
 	fi; \
-	echo "make teach: five expressions compiled, typed, read, run, and answered"
+	echo "make teach: eleven expressions compiled, typed, read, run, and answered"
 
 # Both suites.  The machine's own first, because it is the thing everything else
 # is a claim about.
