@@ -980,3 +980,70 @@ row now. What is left is a table, in walk order, printed in address order, and
 the pushed core's addresses are checked by what the machine answers -- `/12` the
 first thing of the sample, `/26` the second, `/2` the value just pushed on -- the
 way the session's moved addresses already were.
+
+## 25. The notebook is a file on the host, and what is written down is the log rather than the session
+
+**Decided:** Step 4 makes the guest book survive the power being turned off. The
+kill list has no disk, no filesystem and no driver, so the only thing that can
+outlive the machine is the wire it already has, and the host is what is on the
+other end of it. A record is written down as each line runs, and on the next boot
+the host hands those records back and the session is rebuilt from them. The
+notebook is a file the host keeps, `session.log` by default, and `make notebook`
+is the shell line that holds it.
+
+**What is written down is the log, not the session.** This is the decision the
+rest of Step 4 hangs on. The durable form could have been the session noun
+printed as one line of bracket text, and it is the wrong choice for two reasons
+that only one of which is obvious:
+
+- *It runs into the reader's own ceiling.* A line may be 4096 characters, and a
+  session is a log of every line that ran. Eleven lines of the eleven in
+  `make teach` is already a noun well over 4096 characters, so a snapshot is a
+  noun the machine's own reader cannot read back. The log does not have this
+  problem, because a record is one line, and a line is what the reader was
+  already built to take.
+- *A snapshot is the wrong idea.* This project's argument is that the state of
+  the machine is a log and its history is everything it has already written. A
+  snapshot of the present, restored by loading the present back in, is a
+  mutable-state machine with extra steps, and it is the thing Lamp is an
+  argument against. Replaying the log re-derives the present from the history,
+  which is the same operation the guest book already does on every line, so
+  restore is not a new code path at all: it is the ordinary loop, fed its own
+  history.
+
+So the record is the formula that ran, and what it answered:
+
+```
+% [1 42 0]: 42
+```
+
+Noun text is digits, spaces and brackets, so a colon cannot appear inside either
+half of a record and the first colon splits the line. A person can read the
+notebook; the host can find the records in it with a `grep` that matches `^% `.
+
+**The answer is written down so that restoring can check itself.** Replaying a
+log re-runs the formulas, and the machine is deterministic -- the suite says so
+on every boot -- so the answers must come back the same. They are recorded, and
+each replayed record's answer is compared against what the notebook says it was,
+with `noun_equal` and not by comparing text. A record that does not reproduce is
+reported by name and by value and the session is left alone, because a session
+restored from a notebook that has been edited by hand is worse than a session
+that was never restored at all. This is not Step 5's "cannot be lied to" -- that
+is about the machine rewriting itself, and it is not started. It is one check,
+in one direction, on the one stream Step 4 adds, and it is here because a
+restore nobody checks is a restore nobody should trust.
+
+**Replay does not write records.** A record fed in is not echoed as a record
+back out, because the host appends every record it sees to the notebook and a
+notebook that doubles itself on every boot is not a notebook. So a boot with
+twelve records in the file leaves twelve records in the file, and grows only
+when new lines are run.
+
+**A power cut costs at most the line in flight.** Records are written as lines
+run rather than at exit, so the notebook is a prefix of the session at every
+moment, and the worst case is a power cut in the microseconds between a line
+being run and its record reaching the host. Exit is not a durability event here
+and nothing is written then; `make notebook-test` kills the machine with SIGKILL
+and reads the notebook afterwards, which is the only test of this claim that is
+worth having, because a save-on-exit feature would pass a test that shut down
+politely and fail this one.
