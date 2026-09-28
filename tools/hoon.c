@@ -413,6 +413,9 @@ static const char *ordinal(int i)
     case 2: return "third";
     case 3: return "fourth";
     case 4: return "fifth";
+    case 5: return "sixth";
+    case 6: return "seventh";
+    case 7: return "eighth";
     default: return "later";
     }
 }
@@ -1405,6 +1408,11 @@ static const struct {
     { "a number where * runs a formula",
       "*(/2 2)",
       "* runs its second argument as a formula, and a number is not one" },
+    { "the sixth, seventh and eighth things of a sample, by name",
+      "=+(a |(0 1 2 3 4 5 6 7) /40)",
+      "/190 the sixth thing of the sample, which is a number here /382 the "
+      "seventh thing of the sample, which is a number here /766 the eighth "
+      "thing of the sample, which is a number here" },
     { "an address the session does not have", "/37",
       "are /2 the log /6 the last answer /8 the newest line /14 the count "
       "/18 that line's answer" },
