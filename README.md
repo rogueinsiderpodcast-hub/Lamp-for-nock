@@ -13,7 +13,7 @@ implement in full. Lamp implements all of it, from nothing, on a serial port.
 ```
 $ make test
 ...
-  checklist: 11 of 11 done
+  checklist: 12 of 12 done
   LAMP: LIT
 ```
 
@@ -24,16 +24,16 @@ No operating system, no libc, no bootloader, no disk, no network. The only piece
 of hardware it touches is the 16550 serial port at 0x3f8, polled, one byte at a
 time.
 
-The whole machine is 2,404 lines, counting non-blank lines with `/* */` and
-`//` comments stripped: 133 of assembly to reach long mode, 1,302 of C, 852 of
-tests, and 117 of headers. `make lines` runs the count, so the figure is a
+The whole machine is 2,514 lines, counting non-blank lines with `/* */` and
+`//` comments stripped: 133 of assembly to reach long mode, 1,411 of C, 852 of
+tests, and 118 of headers. `make lines` runs the count, so the figure is a
 command and not a claim. (Stated that way because the previous figure, 1,991,
 could not be reproduced by any counting method and was therefore not worth
 carrying, and because a number nobody can re-derive is a number nobody should
 trust: the method is `tools/lines.awk`, and it is awk because a `/*` comment can
 open on one line and close on another, which any per-line filter gets wrong.
 The 852 of tests are 262 checks over the noun layer, the interpreter, the
-primitives, the reader and the book; the host compiler in `tools/hoon.c` is 554
+primitives, the reader and the book; the host compiler in `tools/hoon.c` is 951
 lines and is *not* in this figure, because it is not part of the machine — it is
 the thing that feeds it, and neither is `tools/jet-proofs.c`.) It
 implements Nock 4K — all twelve opcodes — over a noun representation where
@@ -44,16 +44,22 @@ written.
 ## Running it
 
 Needs `qemu-system-x86_64` (`sudo pacman -S qemu-system-x86`), a C compiler and
-binutils. Nothing else.
+binutils. `make notebook` also wants bash, because it keeps the guest's output
+moving while a second process copies the records out of it, and a POSIX sh
+pipeline cannot do both at once without holding the prompt back until the next
+newline. Nothing else does.
 
 ```
 make        # build build/boot.elf and build/boot.bin
 make run    # boot it, watch the serial line
 make test   # boot it, fail the build if any check fails
-make check  # all three suites: machine, compiler, jet proofs
-make hoontest  # the host compiler's own 40 checks
+make check  # all four suites: machine, compiler, jet proofs, notebook
+make hoontest  # the host compiler's own checks
 make proofs  # the native primitives against their Nock definitions
 make teach  # compile eleven expressions and watch the guest run them
+make notebook  # run the guest book with a notebook on the host (Step 4)
+make notebook-test  # SIGKILL the machine, reboot, and check the session came back
+make notebook-forget  # throw the notebook away, on purpose
 make debug  # boot it with QEMU stopped at the reset vector
 make lines  # count the machine's lines, the way this README counts them
 make clean
@@ -126,6 +132,41 @@ the loop, what it costs, and the two silent wrong answers the compiler now
 refuses, and `docs/state.md` has the four things the compiler got wrong first
 and the three it got wrong later.
 
+### Keeping the session when the power goes off
+
+Every line that runs is written down as it runs, as a record: the formula, a
+colon, and the answer it gave. The host keeps them in a file, and the next boot
+is handed them before your own input, so the session is rebuilt by replaying its
+own log rather than by loading a snapshot back in.
+
+```
+$ make notebook
+  > [1 42 0]
+  42  (1 so far)
+% [1 [42 0]]: 42
+  > [0 14 0]
+  1  (2 so far)
+% [0 [14 0]]: 1
+  > # power cut here -- the machine is killed, not shut down
+$ make notebook
+  > % [1 [42 0]]: 42
+  restored 1, answering 42
+  > % [0 [14 0]]: 1
+  restored 2, answering 1
+  > [0 14 0]
+  2  (3 so far)
+% [0 [14 0]]: 2
+```
+
+There is no disk, no filesystem and no driver involved, because the kill list
+has none of those: the serial line is the only thing that can outlive the
+machine, and the file is on the host at the other end of it. `make
+notebook-test` is the claim checked on every build, and it is checked with
+SIGKILL rather than a clean exit, because a notebook written on the way out
+would pass a test that shut down politely and fail this one. A record that lies
+about its answer is refused by name and the session is left alone, so a
+hand-edited notebook cannot quietly become a session.
+
 ## Layout
 
 ```
@@ -175,6 +216,9 @@ This matters more than the feature list, so it is stated plainly.
   hook enabled and disabled — plus that the native was handed the two numbers the
   formula wrote, that a hint of any other shape is not jetted at all, and that a
   native which stops backs the hint out instead of stopping the machine
+- the notebook, in `make notebook-test`: a SIGKILL mid-session, a reboot, and a
+  session that came back with its history -- plus a record whose answer does not
+  reproduce, which is refused by name and leaves the session alone
 - three of the twenty primitives against their Nock definitions, in `make proofs`:
   `+inc`, `+eq` and `+not` are read by the machine's own reader, printed back by
   the machine's own printer, run by the machine's own interpreter, and required to
@@ -206,6 +250,11 @@ This matters more than the feature list, so it is stated plainly.
 - the rules were not cross-checked against a second implementation. The
   interpreter is the only one here, and the tests were written from the same
   reading of the rules, so a misreading would not be caught (item 11)
+- that the notebook on the host is not tampered with between boots. A restore
+  checks every record against the answer written beside it and refuses one that
+  does not reproduce, which catches a wrong record, and it is not a proof
+  against an attacker who can edit both halves: that is Step 5's "cannot be lied
+  to", and Step 5 has not been started (item 25)
 
 None of these are hard, and none of them is the guest book: the session is a
 noun and the step is a formula, so what is left here is a question about Hoon

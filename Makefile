@@ -50,6 +50,17 @@ OBJS    := $(patsubst %.c,$(BUILD)/%.o,$(C_SRCS)) \
 # QEMU's isa-debug-exit device makes the guest exit with (code << 1) | 1, so a
 # clean run leaves status 1 and a failed run leaves status 3.  A single -kernel
 # image, no disk, no firmware, no network: the only I/O is the serial line.
+# Step 4's notebook target needs bash and nothing else does: it keeps the
+# terminal's own output moving while a second process copies the records out of
+# it, and a POSIX sh pipeline cannot do both at once without holding the guest's
+# prompt back until the next newline arrives.  The prompt is a prompt only if it
+# shows up when there is nothing to type yet.
+SHELL := /bin/bash
+
+# The notebook itself: the file the host keeps the guest book's log in.  It is
+# plain text, one record a line, and it is meant to be read with cat.
+JOURNAL ?= session.log
+
 QEMU := qemu-system-x86_64 -machine pc -m 256 -no-reboot \
         -display none -serial stdio -monitor none \
         -device isa-debug-exit,iobase=0xf4,iosize=0x04
@@ -207,10 +218,111 @@ teach: $(KERNEL) $(HOON)
 	fi; \
 	echo "make teach: eleven expressions compiled, typed, read, run, and answered"
 
+# --- the notebook (Step 4) ---------------------------------------------------
+#
+# The machine has no disk, no filesystem and no driver, so the only thing that can
+# outlive it is the wire it already has.  This target is the whole of the other
+# end: what the notebook holds is fed in before your own input, and every record
+# the guest writes is copied out to the file as it arrives.  See decisions.md
+# item 25.
+#
+# The records are copied out by a second process rather than by the shell at the
+# end, because the end may never come: the point of writing a record as the line
+# runs is that SIGKILL costs at most the line in flight, and a notebook that was
+# written on the way out would be a save file and would cost the whole session.
+#
+# The sed in the copy-out is one line and it is not decoration.  The guest ends a
+# line with CR LF because that is what a terminal wants, and a file wants LF, so
+# the CR comes off on the way into the notebook.  A notebook with CRs in it is a
+# notebook that every tool on the host will read as having a stray character at
+# the end of every line, including the one doing the restoring.
+notebook: $(KERNEL)
+	@{ if [ -f $(JOURNAL) ]; then cat $(JOURNAL); fi; cat -; } \
+	  | $(QEMU) -kernel $(KERNEL) \
+	  | tee >(sed -n 's/\r$$//; /^% /p' >> $(JOURNAL)); \
+	wait
+
+# Throwing the notebook away is a deliberate act and gets its own name, because a
+# machine that forgets on request is a different claim from one that loses things
+# by accident.
+notebook-forget:
+	@rm -f $(JOURNAL)
+	@echo "make notebook-forget: $(JOURNAL) is gone, and so is the session in it"
+
+# The test is a power cut and not a shutdown.  The first run is killed with
+# SIGKILL while the guest is sitting at its prompt waiting for a third line, so
+# the machine gets no chance to do anything on the way out -- if this passed by
+# exiting politely it would be testing save-on-exit, which is not what item 25
+# decided.  The second run is given nothing but the notebook and a question, and
+# the answer has to be the count the first run reached.
+#
+# The third run is a record that lies: the formula is one that really answered
+# 7, and the record claims it answered 8.  The session has to be left alone, and
+# the count read afterwards has to be 0 rather than 1 -- a restore that cannot
+# tell a true record from an edited one is a restore that takes the word of
+# whatever is on the other end of the wire, and this is the check that it does
+# not.
+#
+# A scratch journal in $(BUILD) rather than $(JOURNAL): the test is not allowed to
+# touch the notebook someone is using, and a test that can destroy the thing it
+# is testing is a test that will.
+NOTEBOOK := $(BUILD)/notebook.log
+# A second scratch notebook for the record-that-lies, kept apart so that a run of
+# the test cannot depend on what the runs before it left behind.
+NOTEBOOK2 := $(BUILD)/notebook2.log
+
+notebook-test: $(KERNEL)
+	@rm -f $(NOTEBOOK)
+	@{ printf '[1 42 0]\n[1 7 0]\n'; sleep 8; } \
+	  | timeout -s KILL 6 $(QEMU) -kernel $(KERNEL) \
+	  | tee >(sed -n 's/\r$$//; /^% /p' >> $(NOTEBOOK)); \
+	wait; \
+	n=$$(grep -c '^% ' $(NOTEBOOK) 2>/dev/null || echo 0); \
+	if [ "$$n" != "2" ]; then \
+	    echo "make notebook-test: FAILED -- the notebook holds $$n records, and a power cut should leave 2"; \
+	    cat $(NOTEBOOK) 2>/dev/null; exit 1; \
+	fi; \
+	printf '%s\n[0 14 0]\n\004' "$$(cat $(NOTEBOOK))" \
+	  | timeout -s KILL 30 $(QEMU) -kernel $(KERNEL) \
+	  | tee >(sed -n 's/\r$$//; /^% /p' >> $(NOTEBOOK)) > $(BUILD)/nb2.log 2>&1; \
+	wait; \
+	# The record says 2 and the count line says 3, and that is not a
+	# contradiction: [0 14 0] reads the count as it was before the line ran,
+	# so the two restored lines are the 2 it answers and the line being asked
+	# is the 3 it leaves behind.  Both are checked, because a notebook that
+	# wrote the count after the fact would restore a session one line ahead
+	# of itself.
+	if ! grep -q 'restored 2, answering 7' $(BUILD)/nb2.log; then \
+	    echo "make notebook-test: FAILED -- the notebook did not restore both lines"; \
+	    sed -n '/guest book/,$$p' $(BUILD)/nb2.log; exit 1; \
+	fi; \
+	if ! grep -q '  2  (3 so far)' $(BUILD)/nb2.log; then \
+	    echo "make notebook-test: FAILED -- the restored session forgot its history"; \
+	    sed -n '/guest book/,$$p' $(BUILD)/nb2.log; exit 1; \
+	fi; \
+	if ! grep -q '^% \[0 \[14 0\]\]: 2$$' $(NOTEBOOK); then \
+	    echo "make notebook-test: FAILED -- the line run after the restore was not written down"; \
+	    cat $(NOTEBOOK); exit 1; \
+	fi; \
+	rm -f $(NOTEBOOK2); \
+	printf '%% [1 7 0]: 8\n[0 14 0]\n\004' \
+	  | timeout -s KILL 30 $(QEMU) -kernel $(KERNEL) \
+	  | tee >(sed -n 's/\r$$//; /^% /p' >> $(NOTEBOOK2)) > $(BUILD)/nb3.log 2>&1; \
+	wait; \
+	if ! grep -q 'does not say what it answered' $(BUILD)/nb3.log; then \
+	    echo "make notebook-test: FAILED -- a record that lies about its answer was taken"; \
+	    sed -n '/guest book/,$$p' $(BUILD)/nb3.log; exit 1; \
+	fi; \
+	if ! grep -q '  0  (1 so far)' $(BUILD)/nb3.log; then \
+	    echo "make notebook-test: FAILED -- the session was not left alone after a bad record"; \
+	    sed -n '/guest book/,$$p' $(BUILD)/nb3.log; exit 1; \
+	fi; \
+	echo "make notebook-test: SIGKILL, reboot, and the session came back with its history"
+
 # Both suites.  The machine's own first, because it is the thing everything else
 # is a claim about.
-check: test hoontest proofs
-	@echo "make check: the machine's suite, the compiler's, and the jet proofs all passed"
+check: test hoontest proofs notebook-test
+	@echo "make check: the machine's suite, the compiler's, the jet proofs and the notebook all passed"
 
 debug: $(KERNEL)
 	qemu-system-x86_64 -machine pc -m 256 -no-reboot \

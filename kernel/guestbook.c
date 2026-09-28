@@ -282,6 +282,17 @@ static noun gb_session;
 
 static void gb_show_session(void);
 
+/* The first character of a record.  Named here because the submit path needs it
+ * to tell a record from a line, and the section below is where it is written
+ * down what one looks like. */
+#define GB_RECORD '%'
+
+/* One record, written to the wire and read back from it, and the restore that
+ * reads it.  Both are below; these are here because gb_submit writes one and
+ * reads one. */
+static void gb_record(noun line, noun answer);
+static void gb_restore(void);
+
 /* Everything that happens when a line is finished.  The byte buffer and the
  * echo above are the whole of the terminal handling, and everything worth
  * reading is below: read a noun, hand it and the session to one formula, print
@@ -292,6 +303,17 @@ static void gb_submit(void)
     const char *why = "";
 
     serial_put_nl();
+
+    /* A line from the notebook rather than from a person.  The check is on the
+     * first character that is not a space, because the host's records start with
+     * one and a person pasting one in from a terminal may not. */
+    u64 first = 0;
+    while (first < gb_line_len && gb_line[first] == ' ')
+        first++;
+    if (first < gb_line_len && gb_line[first] == GB_RECORD) {
+        gb_restore();
+        return;
+    }
 
     int rc = gb_parse(gb_line, gb_line_len, &line, &why);
 
@@ -336,6 +358,109 @@ static void gb_submit(void)
     serial_puts("  (");
     noun_print(gb_count(gb_session));
     serial_puts(" so far)\n");
+
+    /* Step 4: the record goes out now, while the line that caused it is the
+     * newest thing that has happened, and not at exit.  A notebook that is
+     * written on the way out is a save file, and a save file is what a power
+     * cut takes; a notebook written as it goes is a prefix of the session at
+     * every moment, and the worst case is a cut between this line running and
+     * these characters reaching the host. */
+    gb_record(gb_entry_line(gb_log_front(gb_log(gb_session))), gb_last(gb_session));
+}
+
+/* --- the notebook --------------------------------------------------------- */
+/* One record is the formula that ran, a colon, and what it answered:
+ *
+ *     % [1 42 0]: 42
+ *
+ * Noun text is digits, spaces and brackets, so a colon cannot be inside either
+ * half and the first colon splits the line.  The host finds the records in the
+ * stream with a `grep` for `^% `, which is why the percent is there and not a
+ * bracket: a record has to be findable without parsing the guest's output, and
+ * a person has to be able to read the file.  decisions.md item 25. */
+
+static void gb_record(noun line, noun answer)
+{
+    serial_puts("% ");
+    noun_print(line);
+    serial_puts(": ");
+    noun_print(answer);
+    serial_put_nl();
+}
+
+/* Feed a record back.  A record is run against the session exactly as a typed
+ * line is, so restore is the ordinary loop and not a second path through the
+ * book, and the answer it produces is compared with the answer the notebook
+ * wrote down: the machine is deterministic, so a record that does not reproduce
+ * is a notebook that has been changed since it was written, and the session is
+ * left alone rather than restored from it.  Nothing is echoed back as a record,
+ * because the host appends every record it sees and a notebook that doubles
+ * itself on each boot is not a notebook. */
+static void gb_restore(void)
+{
+    u64 sep = 0;
+
+    while (sep < gb_line_len && gb_line[sep] != ':')
+        sep++;
+    if (sep == gb_line_len) {
+        serial_puts("  that record has no colon in it.  a record is a formula, a\n");
+        serial_puts("  colon, and the answer it gave: % [1 42 0]: 42\n");
+        return;
+    }
+
+    noun line = 0, said = 0;
+    const char *why = "";
+
+    if (gb_parse(gb_line + 1, sep - 1, &line, &why) != GB_PARSE_OK) {
+        serial_puts("  that record has no formula in it: ");
+        serial_puts(why);
+        serial_put_nl();
+        return;
+    }
+    if (gb_parse(gb_line + sep + 1, gb_line_len - sep - 1, &said, &why) != GB_PARSE_OK) {
+        serial_puts("  that record has no answer in it: ");
+        serial_puts(why);
+        serial_put_nl();
+        return;
+    }
+
+    noun next = 0;
+    int code = gb_step(line, gb_session, &next);
+
+    if (code != NOCK_OK) {
+        /* The same three lines gb_submit has, said about a record rather than a
+         * line, because a notebook that cannot be replayed is a broken notebook
+         * and the reason belongs in the log where the person can see it. */
+        if (code == NOCK_STEPS_OUT)
+            serial_puts("  that record ran out of steps.\n");
+        else {
+            serial_puts("  that record crashed: ");
+            serial_puts(nock_crash_reason());
+            serial_puts("\n");
+        }
+        serial_puts("  the session is as it was.\n");
+        machine_reset_error();
+        return;
+    }
+
+    if (!noun_equal(gb_last(next), said)) {
+        serial_puts("  that record does not say what it answered.  it says ");
+        noun_print(said);
+        serial_puts(", and it answers ");
+        noun_print(gb_last(next));
+        serial_puts(".  the session is left alone,\n");
+        serial_puts("  because a session restored from a notebook somebody has\n");
+        serial_puts("  edited by hand is worse than one that was never restored.\n");
+        machine_reset_error();
+        return;
+    }
+
+    gb_session = next;
+    serial_puts("  restored ");
+    noun_print(gb_count(gb_session));
+    serial_puts(", answering ");
+    noun_print(gb_last(gb_session));
+    serial_put_nl();
 }
 
 /* A blank line asks to be shown the session.  The log is walked here rather
@@ -427,6 +552,44 @@ int gb_session_ok(void)
  * Most of the checklist's lines are claims this file cannot check.  This is one
  * that can be, and it is the one that matters, because everything the guest book
  * will do is a noun somebody typed. */
+/* Step 4, checked on the machine and not only on the host.  A record is a
+ * formula, a colon and an answer, and the claim is that a line printed by the
+ * printer and read by the reader is the same noun -- the reader and the printer
+ * have to agree, or a notebook full of records is a notebook full of garbage.
+ * This builds the record the way gb_record writes it, parses both halves with
+ * the reader the prompt uses, runs the formula half against the book, and asks
+ * whether the answer it gets is the answer the record claims. */
+int gb_journal_ok(void)
+{
+    static const char record[] = "% [1 42 0]: 42";
+
+    noun line = 0, said = 0;
+    const char *why = "";
+
+    /* Everything after the % up to the colon is the formula. */
+    const char *sep = record + 2;
+    while (*sep && *sep != ':')
+        sep++;
+
+    if (gb_parse(record + 2, (u64)(sep - (record + 2)), &line, &why) != GB_PARSE_OK)
+        return 0;
+    if (gb_parse(sep + 1, sizeof record - 1 - (u64)(sep + 1 - record), &said, &why) != GB_PARSE_OK)
+        return 0;
+    if (!noun_equal(said, noun_atom(42)))
+        return 0;
+
+    /* And the formula half has to run to the answer the record claims, through
+     * the same book the prompt uses, on an empty session. */
+    noun out = 0;
+    if (gb_step(line, gb_empty_session(), &out) != NOCK_OK) {
+        machine_reset_error();
+        return 0;
+    }
+    int same = noun_equal(gb_last(out), said);
+    machine_reset_error();
+    return same;
+}
+
 int gb_reader_ok(void)
 {
     static const char text[] = "[1 42 0]";
@@ -451,6 +614,12 @@ void gb_run(void)
     serial_put_nl();
     serial_puts("  [1 42 0] is the constant 42.  [0 14 0] is how many lines\n");
     serial_puts("  have been run.  [0 8 0] is the last line typed.\n");
+    serial_put_nl();
+    serial_puts("  every line that runs is written down as a record, % formula\n");
+    serial_puts("  and the answer it gave, and a line that starts with a % is a\n");
+    serial_puts("  record from the notebook: it is run again, and checked against\n");
+    serial_puts("  the answer written beside it.  `make notebook` keeps that file\n");
+    serial_puts("  on the host and hands it back at the start of the next boot.\n");
     serial_put_nl();
     serial_puts("  > ");
 
@@ -484,7 +653,10 @@ void gb_run(void)
     serial_puts("  leaving the guest book, with ");
     noun_print(gb_count(gb_session));
     serial_puts(noun_atom_val(gb_count(gb_session)) == 1 ? " line in it." : " lines in it.");
-    serial_puts("  the machine is finished, so the\n");
-    serial_puts("  session goes with it.  nothing here is written down.\n");
+    serial_puts("\n");
+    serial_puts("  every one of them was written down as it ran, so the\n");
+    serial_puts("  notebook on the host already has them.  nothing is written\n");
+    serial_puts("  now: a power cut costs the same as this exit, which is at\n");
+    serial_puts("  most the line that was in flight.\n");
     serial_put_nl();
 }

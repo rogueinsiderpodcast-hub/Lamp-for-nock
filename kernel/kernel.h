@@ -147,6 +147,9 @@ int  gb_step(noun line, noun session, noun *out);
 int  gb_parse(const char *text, u64 len, noun *out, const char **why);
 int  gb_reader_ok(void);
 int  gb_session_ok(void);
+/* A record the machine printed can be read back, run, and checked against the
+ * answer it claims (Step 4; decisions.md item 25). */
+int  gb_journal_ok(void);
 u64  noun_capacity(void);
 void gb_run(void);
 

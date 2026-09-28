@@ -15,7 +15,7 @@ of them still leaves something real.
 | **1. Lamp** | It boots, and it counts. | the twenty shortcuts work | **done — green** |
 | **2. Guest Book** | You type at it, it answers, and it remembers everything you did this session. | 1 + 2, writing rather than mutating | **done — green** |
 | **3. Teacher** | You write instructions in a real language, and they run. | 3, code is data | **green — a Hoon-shaped language with cores, names and a loop** |
-| **4. Notebook** | The guest book survives the power being turned off. | durability | not started |
+| **4. Notebook** | The guest book survives the power being turned off. | durability | **green — the log is written down as it runs, and replayed on the next boot** |
 | **5. New Rules** | The machine rewrites its own behaviour from text you send it, and cannot be broken by it. | 5, it cannot be lied to | not started |
 | ~~Wire~~ | ~~Networking~~ | | deferred indefinitely |
 
@@ -33,11 +33,61 @@ Note for later: `vere`/Arvo is a userspace process, not a kernel. The realistic
 endgame is Lamp as a scaffold *around* a real Urbit on the host, not Urbit
 replacing the host.
 
+## Where Step 4 stands
+
+**Green, and the green part is that a SIGKILL costs at most one line.** The
+machine has no disk, no filesystem and no driver, so the only thing that can
+outlive it is the wire it already has, and the notebook is a file on the host at
+the other end of that wire. `make notebook` is the shell line that holds it: the
+records go in before your own input, and every record the guest writes is copied
+out to the file as it arrives rather than at the end, because the end may never
+come.
+
+A record is the formula that ran, a colon, and the answer it gave:
+
+```
+% [1 7 0]: 7
+```
+
+**What is written down is the log and not the session.** The session noun is the
+obvious thing to store and it is the wrong one: a session is a log of every line
+that ran, and eleven lines of `make teach` is already a noun well over the 4096
+characters a line may hold, so a snapshot is a noun the machine's own reader
+cannot read back. Replaying the log has none of that problem -- a record is a
+line, and a line is what the reader was built to take -- and it is the same
+operation the guest book already does on every line, so restore is not a new
+code path at all. It is the ordinary loop, fed its own history. A snapshot
+restored by loading the present back in would be a mutable-state machine with
+extra steps, which is the thing this project is an argument against.
+
+**A restore checks itself.** The machine is deterministic, so a replayed record
+must answer what the notebook says it answered. Each one is compared with
+`noun_equal` and not by comparing text, and a record that does not reproduce is
+reported by name and by value and the session is left alone. That is one check
+in one direction, and it is not Step 5's "cannot be lied to": an attacker who can
+edit both halves of a record is not caught, and that is written down in the
+README's "not verified" list rather than left implied.
+
+`make notebook-test` is the claim, checked on every build, and it is checked the
+way it would actually be lost:
+
+1. two lines run, then SIGKILL while the guest sits at its prompt -- no clean
+   exit, no isa-debug-exit, nothing the guest could have done on the way out
+2. the notebook is fed to a fresh boot and nothing else, and `[0 14 0]` has to
+   answer 2
+3. a record that lies -- the real formula, the wrong answer -- is refused by
+   name, and the count read afterwards has to be 0 rather than 1
+
+All three were checked against sabotage rather than trusted: emptying
+`gb_record` fails phase 1, and making the answer comparison a constant 0 fails
+phase 3.
+
 ## Where Step 1 stands
 
-**Green.** `make test` gives 139 checks, 0 failing, `LAMP: LIT`, checklist 9 of
-9. The machine boots into long mode, reads a heap out of the PVH memory map,
-and runs the noun, Nock and primitive layers. Step 1 is finished: the twenty
+**Green.** `make test` gives 139 checks, 0 failing, `LAMP: LIT`, and a checklist
+of 12 -- 11 of Step 1's own, plus the one Step 4 added. The machine boots into
+long mode, reads a heap out of the PVH memory map, and runs the noun, Nock and
+primitive layers. Step 1 is finished: the twenty
 shortcuts are the whole of the trust base, and everything later stands on them.
 
 The count is 139 rather than 140 because one test was deleted rather than fixed
@@ -172,7 +222,7 @@ could be read:
 
 ## Where Step 2 stands
 
-**Done.** The self-test is 262 checks, 0 failing, `LAMP: LIT`, checklist 11 of 11
+**Done.** The self-test is 262 checks, 0 failing, `LAMP: LIT`, checklist 12 of 12
 -- the eleventh being the new one, that a formula typed at the machine runs and
 what it leaves behind matters.  It was checked by breaking the count increment
 and watching the lamp go dark, because a checklist item that cannot fail is a

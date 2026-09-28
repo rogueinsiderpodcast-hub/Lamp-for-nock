@@ -145,6 +145,8 @@ void kmain(u64 boot_params_phys)
     step(gb_reader_ok(), "a typed line comes back as the noun it is");
     step(gb_session_ok(),
          "a formula typed at the machine runs, and what it leaves behind matters");
+    step(gb_journal_ok(),
+         "a record the machine wrote can be read back, run, and checked against the answer it claims");
     step(failures == 0, "every self-test check passed");
 
     int lit = failures == 0 && checklist_pass == checklist_total;

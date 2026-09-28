@@ -2,3 +2,7 @@ build/
 *.o
 *.elf
 *.bin
+# The notebook is the one thing in this tree that is written by running the
+# machine, and it belongs to whoever is using it rather than to the repository.
+# `make notebook-forget` deletes it; this only keeps git from offering to.
+session.log
