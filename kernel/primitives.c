@@ -124,7 +124,12 @@ static u64 p_dec(u64 a, u64 b)
 }
 
 /* The complement within the atom range, not within 64 bits. */
-static u64 p_not(u64 a, u64 b) { return a ^ NOUN_ATOM_MAX; }
+/* Logical not, which is what Urbit's !. does: 1 for zero, 0 for anything else.
+ * This was a ^ NOUN_ATOM_MAX, a 63-bit complement, wearing the name of a
+ * logical not: a name is the contract, and a primitive called +not that flips
+ * every bit is not the function its name promises.  A program written against
+ * Urbit would have got a number back that was not the answer to anything. */
+static u64 p_not(u64 a, u64 b) { return a == 0 ? 1 : 0; }
 
 static const prim_entry bank[] = {
     { "+add", p_add, A2, 1 },

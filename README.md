@@ -24,15 +24,15 @@ No operating system, no libc, no bootloader, no disk, no network. The only piece
 of hardware it touches is the 16550 serial port at 0x3f8, polled, one byte at a
 time.
 
-The whole machine is 2,402 lines, counting non-blank lines with `/* */` and
-`//` comments stripped: 133 of assembly to reach long mode, 1,302 of C, 850 of
+The whole machine is 2,404 lines, counting non-blank lines with `/* */` and
+`//` comments stripped: 133 of assembly to reach long mode, 1,302 of C, 852 of
 tests, and 117 of headers. `make lines` runs the count, so the figure is a
 command and not a claim. (Stated that way because the previous figure, 1,991,
 could not be reproduced by any counting method and was therefore not worth
 carrying, and because a number nobody can re-derive is a number nobody should
 trust: the method is `tools/lines.awk`, and it is awk because a `/*` comment can
 open on one line and close on another, which any per-line filter gets wrong.
-The 850 of tests are 260 checks over the noun layer, the interpreter, the
+The 852 of tests are 262 checks over the noun layer, the interpreter, the
 primitives, the reader and the book; the host compiler in `tools/hoon.c` is 554
 lines and is *not* in this figure, because it is not part of the machine — it is
 the thing that feeds it, and neither is `tools/jet-proofs.c`.) It
@@ -164,12 +164,13 @@ This matters more than the feature list, so it is stated plainly.
   hook enabled and disabled — plus that the native was handed the two numbers the
   formula wrote, that a hint of any other shape is not jetted at all, and that a
   native which stops backs the hint out instead of stopping the machine
-- two of the twenty primitives against their Nock definitions, in `make proofs`:
-  `+inc` and `+eq` are read by the machine's own reader, printed back by the
-  machine's own printer, run by the machine's own interpreter, and required to
+- three of the twenty primitives against their Nock definitions, in `make proofs`:
+  `+inc`, `+eq` and `+not` are read by the machine's own reader, printed back by
+  the machine's own printer, run by the machine's own interpreter, and required to
   agree with the native over 1,412 inputs — including on which inputs stop, since
   a native that answers where its definition would have stopped is the one way to
-  make a wrong machine faster
+  make a wrong machine faster. The other seventeen are named in the same table
+  with the reason each is still waiting, and a primitive in neither is a failure
 
 **Not verified, and said so in `docs/decisions.md`:**
 

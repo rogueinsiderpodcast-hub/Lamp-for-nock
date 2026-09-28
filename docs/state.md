@@ -172,7 +172,7 @@ could be read:
 
 ## Where Step 2 stands
 
-**Done.** The self-test is 260 checks, 0 failing, `LAMP: LIT`, checklist 11 of 11
+**Done.** The self-test is 262 checks, 0 failing, `LAMP: LIT`, checklist 11 of 11
 -- the eleventh being the new one, that a formula typed at the machine runs and
 what it leaves behind matters.  It was checked by breaking the count increment
 and watching the lamp go dark, because a checklist item that cannot fail is a
@@ -373,9 +373,20 @@ that iterates -- and `+add`, the four comparisons, `+div`, `+mul` and the six
 bitwise and shift operations are all 63-step loops. Unrolling 63 steps is longer
 than a line of input and proves nothing extra.
 
-So the next step is **names**, not proofs, and the evidence for that is the pair
-that did get proved: `+inc` and `+eq` are exactly the two whose Nock definition
-is a single opcode with no iteration in it. Every native is now named in one of
+So the next step is **names**, not proofs, and the evidence for that is the
+three that did get proved: `+inc`, `+eq` and `+not` are exactly the three whose
+Nock definition is a fixed number of opcodes with no iteration and no bit reads
+in it. Unrolling was tried as a way around this and does not work: an unrolled
+63-bit carry chain still has to read a bit at each step, and reading a bit needs
+a comparison, and a comparison is a borrow chain that has to read bits. The
+tower is circular rather than merely long.
+
+One of the three is proved because a bug was fixed rather than because the
+definition was found. `+not` was `a ^ NOUN_ATOM_MAX` -- a 63-bit complement
+wearing the name of a logical not, so a program written against Urbit's `!.`
+would have got back a number that was not the answer to anything. Making the
+body match the name is what gave it a definition at all: the complement needs
+63 bit positions and a loop, and the logical not is equality and a conditional. Every native is now named in one of
 two tables in `tools/jet-proofs.c` -- proved, or pending with the reason it is
 pending -- and a primitive in neither is a failure, so this gap cannot quietly
 grow back open.

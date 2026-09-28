@@ -397,9 +397,13 @@ static void test_primitives(void)
     expect_prim("+dec", 1, 0, 0);
     expect_prim("+dec", 42, 0, 41);
 
-    expect_prim("+not", 0, 0, NOUN_ATOM_MAX);
+    /* +not is logical, as Urbit's !. is: only zero answers 1, and everything
+     * else answers 0. */
+    expect_prim("+not", 0, 0, 1);
+    expect_prim("+not", 1, 0, 0);
+    expect_prim("+not", 5, 0, 0);
     expect_prim("+not", NOUN_ATOM_MAX, 0, 0);
-    expect_prim("+not", 0x0F, 0, 0x7FFFFFFFFFFFFFF0ULL);
+    expect_prim("+not", 0x0F, 0, 0);
 
     /* Nothing wraps around, nothing goes negative, nothing divides by zero. */
     expect_prim_crash("+add", NOUN_ATOM_MAX, 1);

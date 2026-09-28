@@ -104,6 +104,10 @@ static const struct definition definitions[] = {
     { "+eq",  "[5 [[0 [2 0]] [[0 [6 0]] 0]]]",
       "opcode 5 answers 0 when the products of its two arms are the same noun, "
       "and the arms read /2 and /6, so this is 0 exactly when a equals b", 0 },
+    { "+not", "[6 [[5 [[0 [2 0]] [[1 [0 0]] 0]]] [[1 [1 0]] [[1 [0 0]] 0]]]]",
+      "0 is true, so opcode 5 against a constant 0 is 0 exactly when the "
+      "operand is zero, and opcode 6 turns that into 1 there and 0 everywhere "
+      "else: logical not, which is what Urbit's !. does", 0 },
 };
 
 #define N_DEFINITIONS ((int)(sizeof definitions / sizeof definitions[0]))
@@ -143,7 +147,6 @@ static const struct pending pending[] = {
     { "+lsh", "a shift across 63 positions, which needs a loop" },
     { "+rsh", "a shift across 63 positions, which needs a loop" },
     { "+dec", "a borrow chain, which needs a loop" },
-    { "+not", "63 bit positions, which needs a loop" },
 };
 
 #define N_PENDING ((int)(sizeof pending / sizeof pending[0]))
