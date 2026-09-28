@@ -170,7 +170,7 @@ This matters more than the feature list, so it is stated plainly.
   agree with the native over 1,412 inputs — including on which inputs stop, since
   a native that answers where its definition would have stopped is the one way to
   make a wrong machine faster. The other seventeen are named in the same table
-  with the reason each is still waiting, and a primitive in neither is a failure
+  with the reason each is out of reach, and a primitive in neither is a failure
 
 **Not verified, and said so in `docs/decisions.md`:**
 
@@ -178,14 +178,18 @@ This matters more than the feature list, so it is stated plainly.
   own expansions for them do not bracket into valid formulas, so they are
   implemented from the accompanying prose, which is what `urbit/vere` does
   (item 6)
-- that the other eighteen primitives are equivalent to any Nock formula, which is
-  most of them. In Urbit these are jets, and a jet is only legitimate because it
-  computes what its Nock definition computes. The blocker is not arithmetic: a
-  loop in Nock is a core that calls its own arm, which is a noun containing
-  itself, which Hoon writes with a *name* — and this language has no names yet.
-  `+add` and the comparisons and `+div` are all 63-step loops, so they wait for
-  that. Every primitive is named in one of two tables in `tools/jet-proofs.c`,
-  proved or pending-with-a-reason, and one in neither fails the suite (item 9)
+- that the other seventeen primitives are equivalent to any Nock formula, and
+  cannot be: Nock's arithmetic here is opcode 4 and opcode 5, increment and
+  equality, and a jet cannot make up the difference because a native's answer is
+  discarded rather than handed to the formula. Counting is the only addition left
+  and costs its operand — the counting `+add` in item 23 is 992 characters, the
+  reader takes it and the printer gives it back byte for byte, and it answers
+  `+add(1000, 1000) = 2000` before stopping with `call depth exceeded` at
+  `+add(3000, 500)`, against a battery whose smallest large input is 2^31. A
+  loop turns out not to need a name at all: a core can rebuild itself around its
+  own arm (item 23). Every primitive is named in one of two tables in
+  `tools/jet-proofs.c`, proved or pending-with-a-reason, and one in neither fails
+  the suite (items 9 and 23)
 - the hint convention used to dispatch jets is ours, not Urbit's. It is a
   demonstration that the mechanism works, and it is labelled as ours (item 10)
 - the rules were not cross-checked against a second implementation. The

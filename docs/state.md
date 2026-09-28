@@ -354,45 +354,69 @@ types beyond "an address the session has" and "a value the machine can put in a
 noun", no user-defined cores, and nothing that could grow past a line of 4096
 characters.
 
-The next step is not more of this language; it is the native operations proven
-against their Nock definitions, which is what unblocks `+(a b)`. Work on that
-started, and it turned the next step into a smaller question than it looked like.
+The next step was meant to be the native operations proven against their Nock
+definitions, which is what would unblock `+(a b)`. Work on that started, and it
+turned the next step into a smaller question than it looked like, and then into a
+different one.
 
-**Two of the twenty are proved.** `make proofs` carries the Nock definitions of
-`+inc` and `+eq`, runs each through the machine's own reader, printer and
+**Three of the twenty are proved.** `make proofs` carries the Nock definitions of
+`+inc`, `+eq` and `+not`, runs each through the machine's own reader, printer and
 interpreter, and requires it to agree with the native over 1,412 inputs --
 including on which inputs stop, since a native that answers where its definition
 would have stopped is the one way to make a wrong machine faster.
 
-**The other eighteen are blocked, and the reason is worth having.** The blocker
-is not arithmetic. It is that a loop in Nock is a core that calls its own arm,
-which is a noun containing itself, which in Hoon is written with a *name*:
-`=+(a b)`, where `a` names the arm being written. This language has no names, so
-it cannot write a core that refers to itself, so it cannot write any definition
-that iterates -- and `+add`, the four comparisons, `+div`, `+mul` and the six
-bitwise and shift operations are all 63-step loops. Unrolling 63 steps is longer
-than a line of input and proves nothing extra.
+**The other seventeen cannot be proved this way, and not for the reason this file
+used to give.** It used to say that a loop in Nock is a core which calls its own
+arm, which is a noun containing itself, which Hoon writes with a *name*, and that
+this language has no names. The middle of that is wrong, and it was worth checking
+instead of leaving in place: a core does not have to contain itself. Put the arm
+inside the core -- it is a subtree, so the core already holds it -- and the arm
+reads its own arm back out of the core and rebuilds the core around that. The
+self-reference is a tree address resolved at run time rather than an edge in the
+noun graph, so nothing cyclic is ever built and `noun_equal` and the printer stay
+well behaved. `decisions.md` item 23 has it measured: a loop runs at 24 steps and
+21 nouns a turn, and the machine's call-depth ceiling stops it at about 4,900
+turns.
 
-So the next step is **names**, not proofs, and the evidence for that is the
-three that did get proved: `+inc`, `+eq` and `+not` are exactly the three whose
-Nock definition is a fixed number of opcodes with no iteration and no bit reads
-in it. Unrolling was tried as a way around this and does not work: an unrolled
-63-bit carry chain still has to read a bit at each step, and reading a bit needs
-a comparison, and a comparison is a borrow chain that has to read bits. The
-tower is circular rather than merely long.
+So the seventeen are not waiting for names. They are waiting for arithmetic this
+Nock does not have. The interpreter's whole arithmetic is opcode 4 and opcode 5 --
+increment and equality -- and a step-1 jet cannot make up the rest, because the
+native's answer is thrown away rather than handed to the formula: `[11 [0 [7 5]]
+[1 999]]` answers 999 with the hooks on and with them off, while `+add(7, 5) = 12`
+is computed beside it and discarded. Counting is the only addition left, and
+counting costs its operand. The definition that does it is in item 23: 992
+characters, the reader takes it, the printer gives it back byte for byte, it
+answers `+add(1000, 1000) = 2000`, and it stops with `call depth exceeded` at
+`+add(3000, 500)`. The battery's smallest large input is 2^31, so the distance
+between a definition existing and a definition being provable here is about
+six orders of magnitude.
+
+**Which leaves the pattern the three already showed.** `+inc` is opcode 4, `+eq`
+is opcode 5, `+not` is opcode 6 over opcode 5. The method reaches the primitives
+the opcode set already implements, and the other seventeen have no opcode. The
+seventeen are the C table's own trust, which is what `decisions.md` item 9 has
+said from the start; `make proofs` now says it in the open rather than implying a
+queue that something is going to arrive and empty. Unrolling was tried as a way
+around this and does not work either: an unrolled 63-bit carry chain still has to
+read a bit at each step, reading a bit needs a comparison, and a comparison is a
+borrow chain that has to read bits. The tower is circular rather than merely long.
 
 One of the three is proved because a bug was fixed rather than because the
 definition was found. `+not` was `a ^ NOUN_ATOM_MAX` -- a 63-bit complement
 wearing the name of a logical not, so a program written against Urbit's `!.`
 would have got back a number that was not the answer to anything. Making the
 body match the name is what gave it a definition at all: the complement needs
-63 bit positions and a loop, and the logical not is equality and a conditional. Every native is now named in one of
-two tables in `tools/jet-proofs.c` -- proved, or pending with the reason it is
-pending -- and a primitive in neither is a failure, so this gap cannot quietly
-grow back open.
+63 bit positions and a loop, and the logical not is equality and a conditional.
+Every native is named in one of two tables in `tools/jet-proofs.c` -- proved, or
+pending with the reason it is pending -- and a primitive in neither is a failure,
+so this gap cannot quietly grow back open.
 
-What this does *not* do: it does not unblock `+(a b)`. That still needs `+add`,
-and `+add` needs a loop.
+What this does *not* do: it does not unblock `+(a b)`, and the reason is now
+permanent rather than pending. A line of this language cannot add two numbers it
+read at run time, because no formula can obtain a native's value and no opcode
+combines two values. The next step in the language is therefore cores and names as
+features -- `=+(a b)` is worth being able to write, and item 23 says what one
+costs -- rather than as a proof that is going to arrive later.
 
 ## The questions waiting on the bridge
 

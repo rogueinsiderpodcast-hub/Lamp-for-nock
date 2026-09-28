@@ -112,41 +112,52 @@ static const struct definition definitions[] = {
 
 #define N_DEFINITIONS ((int)(sizeof definitions / sizeof definitions[0]))
 
-/* --- the natives with no definition yet ------------------------------------- */
+/* --- the natives this machine cannot define -------------------------------- */
 
 struct pending {
     const char *name;
     const char *why;
 };
 
-/* One reason runs through all of these, and it is the same reason in every
- * case: Nock has no loop.  A core that can call its own arm is a noun that has
- * to contain itself, and the notation for that in Hoon is a name -- `=+(a b)`,
- * where `a` names the arm being written.  Lamp's language has no names, so it
- * cannot write a core that refers to itself, so it cannot write a definition
- * that iterates.  Every operation below is a loop over the 63 bits of its
- * operands: a carry chain for +add, a bit scan for the comparisons, a
- * repetition for the bitwise ones, a long division for +div.  Unrolling 63
- * steps would be longer than a line of input and would prove nothing a loop
- * does not, so they wait for names.  See docs/decisions.md item 9. */
+/* One reason runs through all of these, and it is arithmetic rather than loops.
+ * A loop turned out not to need a name: a core can hold its own arm and rebuild
+ * itself around that arm, which is measured in docs/decisions.md item 23.  What
+ * Nock here cannot do is combine two values.  The interpreter's entire
+ * arithmetic is opcode 4 and opcode 5 -- increment and equality -- and a step-1
+ * jet cannot supply the rest, because the native's answer is thrown away rather
+ * than delivered to the formula (item 10).  So each of these is a loop whose
+ * cost is the size of its operands, and the counting definition of +add written
+ * out in item 23 answers +add(1000, 1000) correctly and then stops with
+ * `call depth exceeded` at +add(3000, 500), while the battery's smallest large
+ * input is 2^31.
+ *
+ * Every operation below is a loop over the 63 bits of its operands: a carry
+ * chain for +add, a bit scan for the comparisons, a repetition for the bitwise
+ * ones, a long division for +div.  Unrolling 63 steps would not help either,
+ * and the reason is worth keeping: an unrolled step still has to read a bit,
+ * reading a bit needs a comparison, and a comparison is a borrow chain that
+ * itself has to read bits.  The tower is circular, not merely long.
+ *
+ * These are not a queue.  Nothing in the language is going to arrive and let
+ * them be written down; see docs/decisions.md items 9 and 23. */
 static const struct pending pending[] = {
-    { "+add", "a carry chain over 63 bits, which needs a loop" },
-    { "+sub", "a borrow chain, which needs a loop" },
-    { "+mul", "63 shift-and-add steps, which needs a loop" },
-    { "+div", "a long division, which needs a loop" },
-    { "+mod", "the remainder that long division leaves behind" },
-    { "+min", "a comparison, and the comparisons need a bit scan" },
-    { "+max", "a comparison, and the comparisons need a bit scan" },
-    { "+lt",  "a bit scan from the top down, which needs a loop" },
-    { "+le",  "a bit scan from the top down, which needs a loop" },
-    { "+gt",  "a bit scan from the top down, which needs a loop" },
-    { "+ge",  "a bit scan from the top down, which needs a loop" },
-    { "+and", "63 bit positions, which needs a loop" },
-    { "+or",  "63 bit positions, which needs a loop" },
-    { "+xor", "63 bit positions, which needs a loop" },
-    { "+lsh", "a shift across 63 positions, which needs a loop" },
-    { "+rsh", "a shift across 63 positions, which needs a loop" },
-    { "+dec", "a borrow chain, which needs a loop" },
+    { "+add", "a carry chain over 63 bits" },
+    { "+sub", "a borrow chain over 63 bits" },
+    { "+mul", "63 shift-and-add steps" },
+    { "+div", "a long division" },
+    { "+mod", "the remainder a long division leaves behind" },
+    { "+min", "a comparison, and a comparison is a bit scan" },
+    { "+max", "a comparison, and a comparison is a bit scan" },
+    { "+lt",  "a bit scan from the top down" },
+    { "+le",  "a bit scan from the top down" },
+    { "+gt",  "a bit scan from the top down" },
+    { "+ge",  "a bit scan from the top down" },
+    { "+and", "63 bit positions" },
+    { "+or",  "63 bit positions" },
+    { "+xor", "63 bit positions" },
+    { "+lsh", "a shift across 63 positions" },
+    { "+rsh", "a shift across 63 positions" },
+    { "+dec", "a borrow chain over 63 bits" },
 };
 
 #define N_PENDING ((int)(sizeof pending / sizeof pending[0]))
@@ -495,7 +506,7 @@ int main(void)
         prove(&definitions[i]);
     }
 
-    printf("\n== and the %d with no definition yet\n", N_PENDING);
+    printf("\n== and the %d with no definition this machine can run\n", N_PENDING);
     for (i = 0; i < N_PENDING; i++)
         printf("  %-5s %s\n", pending[i].name, pending[i].why);
 

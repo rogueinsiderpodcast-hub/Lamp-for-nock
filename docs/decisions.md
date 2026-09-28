@@ -331,26 +331,48 @@ needs 63 bit positions and a loop, and the logical not needs equality and a
 conditional. Three primitives proved is three, and one of them is proved
 *because* the bug was fixed.
 
-**Not proven:** the other seventeen. The blocker is not arithmetic, it is that
-Nock has no loop. `+add` is a carry chain over 63 bits, the comparisons are bit
-scans, `+div` is a long division, and each of them has to iterate. Iterating in
-Nock means a core that calls its own arm, which means a noun that contains
-itself, and the notation for that in Hoon is a *name*: `=+(a b)`, where `a` names
-the arm being written. Lamp's language has no names, so it cannot write a core
-that refers to itself, so it cannot write a definition that iterates.
+**Not proven:** the other seventeen, and the reason is arithmetic rather than
+iteration. It used to be written down the other way round -- that Nock has no
+loop, that a core which calls its own arm has to be a noun containing itself, and
+that the notation for that is a name -- and the middle of that is wrong. A core
+does not have to contain itself: put the arm inside the core, and the arm reads
+its own arm back out of the core and rebuilds the core around it. Item 23 has
+that measured rather than argued. So the seventeen are not waiting for a name.
+
+They are waiting for something Nock here does not have, which is a way to combine
+two values. The interpreter's whole arithmetic is opcode 4 and opcode 5 --
+increment and equality -- and a step-1 jet cannot supply the rest, because the
+native's answer is thrown away instead of being handed to the formula (item 10):
+`[11 [0 [7 5]] [1 999]]` answers 999 with the hooks on and with them off, while
+`+add(7, 5) = 12` is computed beside it and discarded. Counting is the only
+addition left, and counting costs its operand. The definition that does it is in
+item 23: 992 characters, taken by the machine's own reader and given back byte for
+byte by the machine's own printer, answering `+add(1000, 1000) = 2000` and then
+stopping with `call depth exceeded` at `+add(3000, 500)`. The battery's smallest
+large input is 2^31, so the distance between a definition existing and a
+definition being provable on this machine is about six orders of magnitude,
+and no amount of names closes it.
+
+**Which leaves the pattern the three proved ones had already shown.** `+inc` is
+opcode 4, `+eq` is opcode 5, `+not` is opcode 6 over opcode 5. The method reaches
+the primitives the opcode set already implements; the other seventeen have no
+opcode. Giving the interpreter real arithmetic opcodes would extend the method and
+would also re-implement inside the interpreter the very table the natives are, so
+it would be a different machine rather than a better-checked one. The seventeen
+are therefore the C table's own trust, which is what the top of this item has said
+all along, and `make proofs` now says so in the open instead of implying a queue.
 
 **Unrolling does not get around this, which is worth having checked rather than
 assumed.** It looked like it should: a 63-bit carry chain is 63 steps, and 63
 steps written out is not a loop. But each unrolled step still has to *read a
 bit*, and reading bit `i` means asking whether the operand is at least 2^i,
-which means a comparison; a comparison is a borrow chain, which is a loop; and
-the borrow chain's own steps need to read bits. The tower is circular, not
-merely long, so the two primitives that are proved are the ones with no bit
-reads in them at all. The first job of the next step is therefore names, not
-proofs.
+which means a comparison; a comparison is a borrow chain, which is a loop; and the
+borrow chain's own steps need to read bits. The tower is circular, not
+merely long, so the three primitives that are proved are the ones with no bit
+reads in them at all.
 
 **What the battery is and is not,** since a suite that oversells itself is worse
-than none: for both proved primitives the rule that gives the definition is one
+than none: for the proved primitives the rule that gives the definition is one
 line of the specification, and the equivalence is settled by setting that rule
 beside the two lines of C implementing it. 1,412 inputs cannot establish it. They
 are there to catch the day somebody edits a native to be cleverer than the opcode
@@ -416,9 +438,12 @@ numbers written and the sum of them. Both rules above were added because removin
 either one makes a check fail.
 
 **Not proven:** that the jet mechanism can stand in for a *standard library*
-definition. Two of the twenty primitives now have Nock definitions and are proved
-against them (`make proofs`); the other eighteen cannot be written down until the
-language has names, because a loop is a name. See item 9.
+definition -- and it cannot, because a jet cannot deliver a value, which is the
+whole point of the two rules above. Three of the twenty primitives have Nock
+definitions and are proved against them (`make proofs`); the other seventeen
+cannot be written down in any form this machine can run, and the reason is a
+missing arithmetic rather than a missing name. See item 9, and item 23 for what a
+loop costs here.
 
 ---
 
@@ -771,8 +796,64 @@ which is the one form here that can make a formula out of two atoms: `*(|(1 3)
 **Cost:** the language is a bridge, not a port, and three things are visibly
 missing. There is no loop, so there is no way to say `=+(a ~(c =+(a b) 0))`
 yet -- which is also the shape every Hoon recursion takes, and much of the reason the
-compiler is 605 lines rather than 40. `+(a b)` for run-time values is missing on
-purpose, so arithmetic on a line is a Step 4 question that needs the native
-operations proven first. And `*` costs an extra `|` per call for the reason
-above, which is the first place where this language is worse to write than the
-one it borrows from.
+compiler is 605 lines rather than 40. `+(a b)` for run-time values is missing, and
+item 23 is why that is not a queue item: no formula can obtain a native's value,
+so a line of this language cannot add two numbers it read at run time, and
+proving the natives first would not change it. And `*` costs an extra `|` per
+call for the reason above, which is the first place where this language is worse to
+write than the one it borrows from.
+
+---
+
+## 23. A core can call its own arm without containing itself
+
+**Decided:** nothing. This is a finding, recorded because item 9's reason for
+leaving seventeen primitives unproved turned out to be wrong, and a wrong reason
+left sitting in a decision is worse than no reason at all.
+
+**The claim, which is the opposite of what item 9 said:** a core that calls its
+own arm does not have to be a noun that contains itself. The arm is a subtree of
+the core, so the core already holds it, and the arm can read its own arm back out
+of the core and rebuild the core around that. The self-reference is a tree address
+resolved at run time, not an edge in the noun graph -- so the graph stays acyclic,
+and `noun_equal`, the printer, and every structural walk over a noun are unaffected
+by a program that recurses.
+
+The shape, for a core that is the six-element list `[a b i carry result arm 0]`:
+`a` at `/2`, `b` at `/6`, `i` at `/14`, `carry` at `/30`, `result` at `/62`, and
+the arm at `/126`. Opcode 9 reaches the arm on `/126`, and the self-call rebuilds
+the core with `|(a b i+1 carry' result' arm)`, where that last `arm` is the read of
+`/126` out of the core the arm is already running on.
+
+**Measured, on this machine:** 24 steps and 21 nouns a turn. The call-depth
+ceiling stops a loop at about 4,900 turns and the host's 131,072-cell arena would
+have allowed about 6,200, so depth binds first. The six-field core below nests
+more per turn than the two-field countdown did and gives out at about 3,500 of
+them -- the same ceiling, reached sooner. At that rate a 63-turn bit scan would
+cost roughly 1,500 steps at depth 130, which is why the arithmetic below fails for
+the size of its operands rather than for want of a loop.
+
+**How far that gets, which is `+add` by counting.** Nock's arithmetic is opcode 4
+and opcode 5, so a sum is a loop that increments an accumulator once per turn
+until `a` turns have passed and then `b` more. In the machine's own notation:
+
+```
+[9 [126 [[10 [[126 [1 [[6 [[5 [[0 [62 0]] [[1 [0 0]] 0]]] [[6 [[5 [[0 [14 0]] [[0 [2 0]] 0]]] [[9 [126 [[10 [[126 [0 [126 0]]] [[10 [[62 [1 [1 0]]] [[10 [[30 [0 [30 0]]] [[10 [[14 [1 [0 0]]] [[10 [[6 [0 [6 0]]] [[10 [[2 [0 [2 0]]] [[1 [[0 [0 [0 [0 [0 [0 0]]]]]] 0]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] [[9 [126 [[10 [[126 [0 [126 0]]] [[10 [[62 [1 [0 0]]] [[10 [[30 [4 [[0 [30 0]] 0]]] [[10 [[14 [4 [[0 [14 0]] 0]]] [[10 [[6 [0 [6 0]]] [[10 [[2 [0 [2 0]]] [[1 [[0 [0 [0 [0 [0 [0 0]]]]]] 0]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]]] [[6 [[5 [[0 [14 0]] [[0 [6 0]] 0]]] [[0 [30 0]] [[9 [126 [[10 [[126 [0 [126 0]]] [[10 [[62 [1 [1 0]]] [[10 [[30 [4 [[0 [30 0]] 0]]] [[10 [[14 [4 [[0 [14 0]] 0]]] [[10 [[6 [0 [6 0]]] [[10 [[2 [0 [2 0]]] [[1 [[0 [0 [0 [0 [0 [0 0]]]]]] 0]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]]] 0]]]] 0]]] [[10 [[62 [1 [0 0]]] [[10 [[30 [1 [0 0]]] [[10 [[14 [1 [0 0]]] [[10 [[6 [0 [6 0]]] [[10 [[2 [0 [2 0]]] [[1 [[0 [0 [0 [0 [0 [0 0]]]]]] 0]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]]
+```
+
+`make proofs` cannot check that definition, and writing it down is the point. The
+reader takes it and the printer gives it back byte for byte. It answers
+`+add(1000, 1000) = 2000` correctly, and it stops with `call depth exceeded` at
+`+add(3000, 500)` -- against a battery whose smallest large input is 2^31, so
+six orders of magnitude short of the inputs it would have to agree on. There
+is nowhere to put it either: the host's arena is a single 4 MiB bump allocation
+with no collector and no reset, so 1,412 loop-running cases would not fit in it
+whatever the arithmetic cost.
+
+**What this does and does not change.** It takes the language off the list of
+things standing between the machine and those seventeen proofs: a name is worth
+having for its own sake, and a core can now be written down and measured. It does
+not unblock `+(a b)`, and it is not on the way to unblocking it -- the blocker is
+that no formula can obtain a native's value (item 10) and that no opcode combines
+two values. What it buys is the shape of a core here, measured, for whoever writes
+`=+(a b)` in the language next.
