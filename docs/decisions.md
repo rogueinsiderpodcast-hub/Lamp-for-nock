@@ -908,6 +908,14 @@ keeps the formula the same size as the count grows:
 | 1001 (limit 1000) | 17015 | 7096 | 370 |
 | 10001 (limit 10000) | 84968 | 35075 | 370, then `call depth exceeded` |
 
+Every one of those steps is `15 + 17n` and every one of those nouns is
+`92 + 7n`, for a limit of `n` and a session of one entry, both exact: limits 0,
+1, 2, 3, 4, 5, 6, 10, 100 and 1000 were run and every one landed on the
+arithmetic. The steps do not depend on the session, and the nouns do: a
+five-entry session is 4 nouns heavier at every limit, which is where 103 and
+131 in the table above come from. So a reader can price any loop they care about
+without running it.
+
 So 17 steps and 7 nouns per call -- 7.0 from the two long runs, 792 cells at 100
 calls and 7092 at 1000 -- and the formula constant. What ends a long loop is
 `NOCK_MAX_DEPTH` (10000), the interpreter's own C recursion at one frame per

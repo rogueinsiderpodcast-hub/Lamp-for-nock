@@ -351,10 +351,10 @@ rediscover them.
 
 ### What is not here
 
-No run-time addition, on purpose. No
-types beyond "an address the session has" and "a value the machine can put in a
-noun", no user-defined cores, and nothing that could grow past a line of 4096
-characters.
+No run-time addition, on purpose. No types beyond "an address the session has"
+and "a value the machine can put in a noun", and nothing that could grow past a
+line of 4096 characters. Cores and names are here now -- they were the missing
+piece of this list, and the section below is what they came to.
 
 The next step was meant to be the native operations proven against their Nock
 definitions, which is what would unblock `+(a b)`. Work on that started, and it
@@ -416,9 +416,11 @@ so this gap cannot quietly grow back open.
 What this does *not* do: it does not unblock `+(a b)`, and the reason is now
 permanent rather than pending. A line of this language cannot add two numbers it
 read at run time, because no formula can obtain a native's value and no opcode
-combines two values. The next step in the language is therefore cores and names as
-features -- `=+(a b)` is worth being able to write, and item 23 says what one
-costs -- rather than as a proof that is going to arrive later.
+combines two values. So the language's next step was taken in that direction
+rather than in the direction of a proof: cores and names as features, `=+(a b)`
+worth being able to write, item 23 saying what one costs. What they cost is
+below, and the answer is 17 steps and 7 nouns a call, with the source the same
+size however far the loop counts.
 
 ## Cores, names, and a loop
 
