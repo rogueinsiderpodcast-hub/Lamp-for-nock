@@ -244,11 +244,22 @@ static noun zeros(int n)
  * on and not the one outside it -- which is why the check lives in emit() and
  * not in the parser. */
 
+/* An entry is an address and its label, and the label is the entry's own buffer
+ * rather than a pointer to one.  It was a pointer, and that was wrong in a way
+ * that took an evening to find: `struct axis` rows get moved -- a push shifts
+ * every one of them, a sort reorders them, entering and leaving a core saves and
+ * restores the whole table -- and a `const char *` inside a struct that is
+ * copied brings the characters along and leaves the pointer behind.  Every such
+ * move then described whatever row the pointer used to be.  A refusal in a core
+ * pushed into listed /3 twice, called /14 the sample, and had no first thing of
+ * the sample at all: the addresses were right and every label after the second
+ * was two rows out, and a shape is the only thing this compiler ever writes down
+ * about the subject, so a label that names the wrong address is a wrong answer of
+ * a different kind.  There is no pointer here to get wrong. */
 struct axis {
-    u64         at;
-    const char *name;
-    char        name_buf[192];   /* for a label this file built rather than a fixed one */
-    int         nargs;           /* 0 for a number or a read, the count for a list */
+    u64   at;
+    char  name[192];             /* the label this address has, here, in this row */
+    int   nargs;                 /* 0 for a number or a read, the count for a list */
 };
 
 #define MAX_AXES 16
@@ -256,14 +267,17 @@ struct axis {
 static struct axis shape[MAX_AXES];
 static int         shape_len;
 
+static void shape_add(u64 at, const char *name);
+static void axis_set(struct axis *a, u64 at, const char *name, int nargs);
+
 static void shape_session(void)
 {
     shape_len = 0;
-    shape[shape_len].at = 2;  shape[shape_len].name = "the log";           shape_len++;
-    shape[shape_len].at = 6;  shape[shape_len].name = "the last answer";    shape_len++;
-    shape[shape_len].at = 8;  shape[shape_len].name = "the newest line";    shape_len++;
-    shape[shape_len].at = 14; shape[shape_len].name = "the count";          shape_len++;
-    shape[shape_len].at = 18; shape[shape_len].name = "that line's answer"; shape_len++;
+    shape_add(2,  "the log");
+    shape_add(6,  "the last answer");
+    shape_add(8,  "the newest line");
+    shape_add(14, "the count");
+    shape_add(18, "that line's answer");
 }
 
 /* A tree address is a leading 1 and then a path, and the new subject's tail --
@@ -294,11 +308,25 @@ static u64 axis_shifted(u64 a)
  * and every address inside the old subject has moved. */
 static void shape_push(void)
 {
+    int  kept = 0;
+
     if (shape_len + 2 > MAX_AXES)
         refuse("that is more pushes on the front than a subject can hold");
 
-    for (int i = 0; i < shape_len; i++)
-        shape[i].at = axis_shifted(shape[i].at);
+    /* The old subject is the whole tail now, so an old /1 is a /3, and /3 is
+     * already the entry for the whole of the old subject.  A subject with a /1
+     * in it -- a core, or anything else the compiler walked -- would otherwise
+     * have two rows for one address, and a refusal would list /3 twice and look
+     * like a table with a hole and a duplicate in it. */
+    for (int i = 0; i < shape_len; i++) {
+        struct axis held = shape[i];   /* a copy, because the write can land on the same row */
+
+        if (held.at == 1)
+            continue;
+        axis_set(&shape[kept], axis_shifted(held.at), held.name, held.nargs);
+        kept++;
+    }
+    shape_len = kept;
 
     /* Two entries go in at the front -- the value at /2 and the old subject at
      * /3 -- so every existing entry moves up by two, and downwards through the
@@ -315,11 +343,10 @@ static void shape_push(void)
      * a refusal is the only place the whole shape is ever written down. */
     for (int i = shape_len + 1; i > 1; i--)
         shape[i] = shape[i - 2];
-    shape[0].at = 2;
-    shape[0].name = "the value just pushed on";
-    shape[1].at = 3;
-    shape[1].name = "the whole of the old subject";
     shape_len += 2;
+    axis_set(&shape[0], 2, "the value just pushed on", 0);
+    axis_set(&shape[1], 3, "the whole of the old subject", 0);
+    (void)0;
 }
 
 /* Two entries came on with the push -- the value at /2 and the old subject at
@@ -355,6 +382,13 @@ static char arm_name[MAX_ARM_DEPTH][MAX_NAME];
 static struct axis arm_sample[MAX_ARM_DEPTH][MAX_AXES];
 static int         arm_sample_len[MAX_ARM_DEPTH];
 static int  arm_depth;
+/* A sample is compiled in the outer subject, where a name means something else
+ * altogether: at the top level the outer subject is the session, so a name in a
+ * sample is a read of /6 -- the last answer -- and inside a nested core it is a
+ * read of the enclosing arm.  Both are answers the person did not ask for, and
+ * the first is a name that compiles at all only because the compiler is inside a
+ * core while it walks a sample. */
+static int  in_sample;
 static int  in_core(void)                 { return arm_depth > 0; }
 
 #define MAX_CORE_DEPTH 8
@@ -384,17 +418,20 @@ static const char *ordinal(int i)
     }
 }
 
+static void axis_set(struct axis *a, u64 at, const char *name, int nargs)
+{
+    a->at = at;
+    a->nargs = nargs;
+    snprintf(a->name, sizeof a->name, "%s", name);
+}
+
 static void shape_add(u64 at, const char *name)
 {
     if (shape_len >= MAX_AXES)
         refuse("that is more addresses in one subject than a table can hold (%d); "
                "the reader's own limit is 4096 characters and a shape is a table",
                MAX_AXES);
-    shape[shape_len].at = at;
-    shape[shape_len].nargs = 0;
-    shape[shape_len].name = NULL;
-    snprintf(shape[shape_len].name_buf, sizeof shape[shape_len].name_buf, "%s", name);
-    shape[shape_len].name = shape[shape_len].name_buf;
+    axis_set(&shape[shape_len], at, name, 0);
     shape_len++;
 }
 
@@ -435,18 +472,38 @@ static const char *axis_name(u64 a)
     return NULL;
 }
 
+/* The list a refusal prints is read by eye against a noun, so it goes out in
+ * address order even though the table is in walk order: the four rows a core
+ * starts with are /1 /2 /3 /6 and the first thing of a two-thing sample is /4,
+ * which is smaller than the arm and comes after it.  The sort is on a copy, so
+ * nothing downstream depends on it -- the arm's own copy of its sample's walk
+ * counts the four fixed rows and reads from there. */
 static void axis_refused(u64 a)
 {
-    char   buf[768];
-    size_t n = 0;
-    int    i;
+    struct axis  sorted[MAX_AXES];
+    char         buf[768];
+    size_t       n = 0;
+    int          i;
+
+    for (i = 0; i < shape_len; i++)
+        sorted[i] = shape[i];
+    for (i = 1; i < shape_len; i++) {
+        struct axis  held = sorted[i];
+        int          j = i - 1;
+
+        while (j >= 0 && sorted[j].at > held.at) {
+            sorted[j + 1] = sorted[j];
+            j--;
+        }
+        sorted[j + 1] = held;
+    }
 
     n += (size_t)snprintf(buf + n, sizeof buf - n,
                           "/%llu is not an address of this subject; the ones it has are",
                           (unsigned long long)a);
     for (i = 0; i < shape_len; i++)
         n += (size_t)snprintf(buf + n, sizeof buf - n, " /%llu %s",
-                              (unsigned long long)shape[i].at, shape[i].name);
+                              (unsigned long long)sorted[i].at, sorted[i].name);
     refuse("%s.", buf);
 }
 
@@ -510,11 +567,7 @@ static void list_shape_walk(struct expr *e, int depth, u64 path, const char *whe
                     refuse("that is more addresses in one core than a table can hold (%d); "
                            "the reader's own limit is 4096 characters and a shape is a table",
                            MAX_AXES);
-                table[*len].at = (1ULL << d) | p;
-                table[*len].nargs = e->arg[i]->nargs;
-                table[*len].name = NULL;
-                snprintf(table[*len].name_buf, sizeof table[*len].name_buf, "%s", ll[d]);
-                table[*len].name = table[*len].name_buf;
+                axis_set(&table[*len], (1ULL << d) | p, ll[d], e->arg[i]->nargs);
                 (*len)++;
             }
             list_shape_walk(e->arg[i], d, p, here[d], table, len);
@@ -528,11 +581,7 @@ static void list_shape_walk(struct expr *e, int depth, u64 path, const char *whe
         refuse("that is more addresses in one core than a table can hold (%d); "
                "the reader's own limit is 4096 characters and a shape is a table",
                MAX_AXES);
-    table[*len].at = (1ULL << depth) | path;
-    table[*len].nargs = 0;
-    table[*len].name = NULL;
-    snprintf(table[*len].name_buf, sizeof table[*len].name_buf, "%s", label);
-    table[*len].name = table[*len].name_buf;
+    axis_set(&table[*len], (1ULL << depth) | path, label, 0);
     (*len)++;
 }
 
@@ -890,6 +939,11 @@ static noun emit(struct expr *e)
          * written down again, which is what lets an arm call itself.  This is
          * decisions.md item 23's mechanism, and the name is the same noun the
          * ~ below hands to the machine. */
+        if (in_sample)
+            refuse("the name '%s' is in a sample, and a sample is compiled in the "
+                   "subject outside the core, where that name is a read of /6 and "
+                   "nothing else: the last answer at the top level, and the arm of "
+                   "the core around this one if there is one", e->name);
         if (!in_core())
             refuse("the name '%s' is not the arm of any core here: a name means the "
                    "arm of a =+, and this is not inside one", e->name);
@@ -1031,11 +1085,41 @@ static noun emit(struct expr *e)
                            tbl[i].nargs ? "a list of a different number of things" : "a single thing",
                            want[i].nargs ? "a list of a different number of things" : "a single thing");
         }
+        /* The arm of the new core is what the machine runs, so it has to be
+         * something that is a formula: a name, which is a read of the arm of the
+         * core this call is in, or another =+, which builds one.  A number or a
+         * read here compiles and then stops the machine with "a formula must be
+         * a cell, but this is an atom", which is the machine being honest about
+         * a noun the compiler wrote down without arguing for. */
+        if (e->arg[1]->arg[1]->kind == K_NAME)
+            ;                                    /* the arm, by name: the common case */
+        else if (e->arg[1]->arg[1]->kind == K_RUNE && e->arg[1]->arg[1]->rune == 'C')
+            ;                                    /* another core's arm, built here */
+        else
+            refuse("the arm of the core an arm call makes has to be a name or a =+, "
+                   "because the machine runs it as a formula, and a %s is not one: "
+                   "a name is the arm of the core this call is in",
+                   e->arg[1]->arg[1]->kind == K_AXIS ? "read"
+                       : (e->arg[1]->arg[1]->kind == K_ATOM ? "number" : "rune"));
         /* nock.c's opcode 9 reads the axis out of the formula itself rather than
          * evaluating it, so the arm goes in as a bare atom and not behind a
          * constant.  Opcode 10 is the other way round, and the two are not
          * interchangeable: an axis that is a formula is a crash, not a read. */
-        return f2(9, A(ARM_AXIS), emit(e->arg[1]));
+        /* Only the new core's sample is a sample.  Its second thing is the arm
+         * slot, and a name there is the whole point: it is a read of the /6 of
+         * the core this call is in, which is how the arm goes back into the core
+         * it came from. */
+        {
+            noun  arm_field = emit(e->arg[1]->arg[1]);
+            noun  new_sample;
+
+            in_sample++;
+            new_sample = emit(e->arg[1]->arg[0]);
+            in_sample--;
+            return f2(9, A(ARM_AXIS),
+                      edit(2, new_sample,
+                           edit(ARM_AXIS, arm_field, lit(two_zeros()))));
+        }
 
     case 'C':
         /* =+(arm sample body) -- a core.  The core is [sample arm 0]: the arm at
@@ -1049,7 +1133,9 @@ static noun emit(struct expr *e)
         if (e->arg[1]->kind != K_RUNE || e->arg[1]->rune != '|')
             refuse("the sample of a core is a |, so that the compiler knows what "
                    "addresses the body may use, and this sample is not one");
+        in_sample++;
         a = emit(e->arg[1]);                    /* the sample, in the outer subject */
+        in_sample--;
         shape_core_enter();
         list_shape_core(e->arg[1], 1, 0, "the sample");
         if (arm_depth >= MAX_ARM_DEPTH)
@@ -1096,6 +1182,7 @@ static noun compile(const char *text)
      * this file's own tests were failing that way before this line existed. */
     core_depth = 0;
     arm_depth = 0;
+    in_sample = 0;
     shape_len = 0;
     shape_session();
 
@@ -1236,6 +1323,17 @@ static const struct expect cases[] = {
     { "a list is an address as well as a container, so it can be passed on", "=+(arm |(|(0 5) 9) ?(/4))", NULL, 0, "0" },
     { "a name is a read of the arm, and the arm is a cell", "=+(arm |(0 1) ?(arm))", NULL, 0, "0" },
     { "a core inside a core, and the shape comes back afterwards", "=+(a |(0 0) =+(b |(0 5) /10))", NULL, 0, "5" },
+    /* A core pushed into.  The core's own /1 is the /3 of the pushed subject,
+     * and the sample's things are a push further out again, so these are the
+     * addresses the labels claim, checked by what the machine answers. */
+    { "inside =>, in a core, the first thing of the sample is at /12",
+      "=+(a |(0 7) =>(/10 /12))", NULL, 0, "0" },
+    { "and the second thing of the sample is at /26",
+      "=+(a |(0 7) =>(/10 /26))", NULL, 0, "7" },
+    { "and the value just pushed is at /2, as anywhere",
+      "=+(a |(0 7) =>(/10 /2))", NULL, 0, "7" },
+    { "and the sample of the core inside is at /6, where a =+ put it",
+      "=+(a |(0 7) =>(/10 ?:(=(/6 /2) 9 8)))", NULL, 0, "8" },
     /* The loop.  The new core is a two-thing list too: the new sample in front,
      * the same arm behind it -- and `arm` here is a read of /6, so the arm goes
      * back into the core it came from rather than travelling through the sample.
@@ -1284,6 +1382,15 @@ static const struct {
       "=+(arm |(0 5) ?:(=(/4 /10) 1 ~(arm 42)))",
       "an arm is called on a core, which is a two-thing list whose first thing "
       "is the sample: [sample arm 0], and this is not one" },
+    /* The whole pushed core, because that is the only place the table is ever
+     * written down, and it used to be written down wrong: the labels pointed two
+     * rows off, so /3 appeared twice and /14 claimed to be the sample. */
+    { "the shape of a core pushed into, all of it",
+      "=+(a |(0 0) =>(/4 /99))",
+      "/2 the value just pushed on /3 the whole of the old subject /6 the sample "
+      "/7 the arm and the end of the list /12 the first thing of the sample, which "
+      "is a number here /14 the arm /26 the second thing of the sample, which is a "
+      "number here" },
     { "an address the session does not have", "/37",
       "are /2 the log /6 the last answer /8 the newest line /14 the count "
       "/18 that line's answer" },
@@ -1318,8 +1425,15 @@ static const struct {
      * where a wrong answer is a wrong noun rather than a crash. */
     { "a name outside a core, which is not the arm of anything", "arm",
       "is not the arm of any core here" },
-    { "a name in the sample of a core, where there is no arm yet",
-      "=+(arm |(0 arm) /4)", "is not the arm of any core here" },
+    { "a name in the sample of a core, where a name means the last answer",
+      "=+(arm |(0 arm) /4)", "is in a sample, and a sample is compiled in the" },
+    { "and a name smuggled into the sample an arm call rebuilds, which is the "
+      "same trap with the loop already in it",
+      "=+(arm |(0 0) ?:(=(/4 /10) 1 ~(arm |([arm 0] arm))))",
+      "is in a sample, and a sample is compiled in the" },
+    { "and an arm call whose new core carries a number where the arm goes",
+      "=+(arm |(0 5) ?:(=(/4 /10) 1 ~(arm |(|(0 0) 7))))",
+      "the arm of the core an arm call makes has to be a name or a =+" },
     { "a sample that is not a list, so the compiler cannot know its addresses",
       "=+(arm /2 *(/2 /6))",
       "the sample of a core is a |, so that the compiler knows what addresses" },
@@ -1327,9 +1441,14 @@ static const struct {
       "an arm is called by its name" },
     { "an arm call outside a core", "~(arm |(0 0))",
       "an arm call has to be inside a =+" },
+    /* The list is in address order, which is not the order the table is built
+     * in: the four rows a core starts with are /1 /2 /3 /6 and the first thing
+     * of a two-thing sample is /4, so the walk puts the arm down before the
+     * smaller address that follows it. */
     { "an address of the core that is not the core's", "=+(arm |(0 5) /8)",
       "are /1 the whole of the core /2 the sample /3 the arm and the end of the "
-      "list /6 the arm /4 the first thing of the sample" },
+      "list /4 the first thing of the sample, which is a number here /6 the arm "
+      "/10 the second thing of the sample, which is a number here" },
 };
 
 /* A session with n entries in it, built by running the machine's own book n

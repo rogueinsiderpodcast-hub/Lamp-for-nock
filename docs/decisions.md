@@ -931,3 +931,31 @@ rebuilding one. Mismatch is a refusal naming both shapes, and an arm called on
 anything that is not `[sample arm 0]` is a refusal too, rather than a noun the
 machine would find by descending into an atom. The old expression is in the
 refusals now, where it used to be in the passing cases.
+
+**Two more of the same kind, found the same way, and one of them was a bug in
+the compiler rather than in the loop.** An arm call's core can also be a
+two-thing list with the arm slot holding a number: `~(arm |(|(0 0) 7))` compiles,
+and the machine stops with *a formula must be a cell, but this is an atom*, which
+is the machine being honest about a noun the compiler wrote down without arguing
+for. So the arm slot of a core an arm call makes has to be a name or another
+`=+`, the two things that are a formula. And a name in a sample was compiling,
+because the compiler is inside a core while it walks a sample, so the
+"not the arm of any core here" check did not fire -- and a name in a sample is a
+read of `/6` in the *outer* subject, which at the top level is the last answer
+and inside a nested core is the enclosing arm. Both answers were things nobody
+asked for. A name in a sample is now refused by name, and the refusal says what
+the name would have meant.
+
+The third was this file's own. A shape row is an address and its label, and the
+label was a `const char *` into a buffer in the same row. Rows move -- a push
+shifts all of them, entering and leaving a core saves and restores the whole
+table -- and a pointer inside a copied struct brings the characters along and
+leaves the pointer behind, so every moved row described whatever row it used to
+be. A refusal in a core pushed into listed `/3` twice, called `/14` the sample,
+and had no first thing of the sample at all. The addresses were right throughout,
+which is why nothing crashed and nothing failed: the subject was correct and the
+compiler's only written-down account of it was not. There is no pointer in the
+row now. What is left is a table, in walk order, printed in address order, and
+the pushed core's addresses are checked by what the machine answers -- `/12` the
+first thing of the sample, `/26` the second, `/2` the value just pushed on -- the
+way the session's moved addresses already were.

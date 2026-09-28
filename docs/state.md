@@ -439,6 +439,17 @@ arm's addresses -- addresses and nesting, not the expressions filling them -- an
 a mismatch is a refusal naming both shapes. `docs/decisions.md` item 24 has the
 measurements, the old expression, and why the machine was right throughout.
 
+Two more refusals came out of the same hunt: an arm call's core cannot carry a
+number where the arm goes, since the machine would run it as a formula and stop,
+and a name in a sample is refused rather than compiled, because a sample is
+compiled in the outer subject where that name is a read of `/6` -- the last
+answer at the top level, the enclosing arm in a nested core. The third find was
+in the compiler rather than the language: a shape row's label was a pointer into
+its own buffer, and rows move, so a core pushed into had a refusal that listed
+`/3` twice and no first thing of the sample. The addresses were always right,
+which is exactly why nothing failed. The rows carry their labels now, and the
+pushed core's addresses have value tests of their own.
+
 ## The questions waiting on the bridge
 
 Asked before the power went out, when the bridge was still a question. All three

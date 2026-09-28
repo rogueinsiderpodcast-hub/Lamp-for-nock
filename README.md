@@ -108,17 +108,21 @@ $ ./build/hoon '+(/14 1)'
 hoon: addition of two values that are only known at run time has no Nock definition in this machine yet: the twenty native operations are a tested bank and not proven jets, and writing this rune as a native call would make the compiler answer questions the machine has never been asked.  +(2 3) works, because the host can fold that.
 ```
 
-Ten forms: an atom, `/axis`, `?(a)`, `=(a b)`, `~(arm core)`, `*(a b)`,
-`|(a b)`, `+(a)`, `+(a b)` for two literals only, plus `=>` (push), `?:`
-(conditional), and `=+` (core). `=+(arm sample body)` builds `[sample arm 0]`,
-so a name in a body is a read of `/6` and the sample's things are `/4`, `/10`,
-`/22`; that is enough to write a loop, and `make teach` runs one. An address is checked
-against the subject the expression will be run on, so an address that is not
-there is refused by name rather than compiled — a wrong address on this machine
-usually names a real noun instead of crashing, and the whole point of the
-language is that it is loud about that. `docs/decisions.md` item 22 has the
-table and the reasons, item 24 has the core and what it costs to loop, and
-`docs/state.md` has the three things the compiler got wrong first.
+Thirteen forms: an atom, `/axis`, a name, a list `[a b]`, `?(a)`, `=(a b)`,
+`*(a b)`, `+(a)`, `+(a b)` for two literals only, `~(arm core)`, `|(a b ...)`,
+`=>` (push on, run there) and `?:(c t e)` (0 is true). On top of those, `=+(arm
+sample body)` builds a core: `[sample arm 0]`, the arm at `/6` whatever the
+sample is, the sample's things at `/4`, `/10`, `/22`, and a name in a body a
+read of that `/6`. That is enough to write a loop, and `make teach` runs one
+down the serial line and checks what the machine answers. `+(a b)` for anything
+but two literals is still refused by name, because no opcode in this machine adds
+two values it only has at run time. An address is checked against the subject
+the expression will be run on, so an address that is not there is refused by name
+rather than compiled — a wrong address on this machine usually names a real noun
+instead of crashing, and the whole point of the language is that it is loud about
+that. `docs/decisions.md` item 22 has the table and the reasons, item 24 has the core,
+the loop, what it costs, and the two silent wrong answers the compiler now
+refuses, and `docs/state.md` has the three things the compiler got wrong first.
 
 ## Layout
 
