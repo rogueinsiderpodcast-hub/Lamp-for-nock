@@ -908,10 +908,14 @@ keeps the formula the same size as the count grows:
 | 1001 (limit 1000) | 17015 | 7096 | 370 |
 | 10001 (limit 10000) | 84968 | 35075 | 370, then `call depth exceeded` |
 
-So 17 steps and 7 nouns per call, the formula constant, and `NOCK_MAX_DEPTH`
-(10000) rather than memory or the reader is what ends a long loop -- the
-depth limit is the interpreter's own C recursion, one frame per call, and it is
-the same wall the `+add` definition in item 23 hit at 3000 turns. This is the
+So 17 steps and 7 nouns per call -- 7.0 from the two long runs, 792 cells at 100
+calls and 7092 at 1000 -- and the formula constant. What ends a long loop is
+`NOCK_MAX_DEPTH` (10000), the interpreter's own C recursion at one frame per
+call, and not memory: the host arena is half of a 4 MiB heap, 131072 cells, so a
+10000-call loop is 70000 cells and memory would bind at about 18700 calls. It is
+the same wall the `+add` definition in item 23 hit at 3000 turns. The reader is
+nowhere near it either: the loop is 370 characters of the 4096 a line may be,
+and the limit itself is the only thing in the source that changes. This is the
 shape of a loop in the language now, measured, and `make teach` runs it as its
 fifth line so the claim is on the machine's own answer rather than the host's.
 
