@@ -53,7 +53,7 @@ make test   # boot it, fail the build if any check fails
 make check  # all three suites: machine, compiler, jet proofs
 make hoontest  # the host compiler's own 40 checks
 make proofs  # the native primitives against their Nock definitions
-make teach  # compile four expressions and watch the guest run them
+make teach  # compile eleven expressions and watch the guest run them
 make debug  # boot it with QEMU stopped at the reset vector
 make lines  # count the machine's lines, the way this README counts them
 make clean
@@ -123,7 +123,8 @@ rather than compiled — a wrong address on this machine usually names a real no
 instead of crashing, and the whole point of the language is that it is loud about
 that. `docs/decisions.md` item 22 has the table and the reasons, item 24 has the core,
 the loop, what it costs, and the two silent wrong answers the compiler now
-refuses, and `docs/state.md` has the three things the compiler got wrong first.
+refuses, and `docs/state.md` has the four things the compiler got wrong first
+and the three it got wrong later.
 
 ## Layout
 

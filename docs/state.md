@@ -14,7 +14,7 @@ of them still leaves something real.
 |---|---|---|---|
 | **1. Lamp** | It boots, and it counts. | the twenty shortcuts work | **done — green** |
 | **2. Guest Book** | You type at it, it answers, and it remembers everything you did this session. | 1 + 2, writing rather than mutating | **done — green** |
-| **3. Teacher** | You write instructions in a real language, and they run. | 3, code is data | **green — a Hoon-shaped language, no loops yet** |
+| **3. Teacher** | You write instructions in a real language, and they run. | 3, code is data | **green — a Hoon-shaped language with cores, names and a loop** |
 | **4. Notebook** | The guest book survives the power being turned off. | durability | not started |
 | **5. New Rules** | The machine rewrites its own behaviour from text you send it, and cannot be broken by it. | 5, it cannot be lied to | not started |
 | ~~Wire~~ | ~~Networking~~ | | deferred indefinitely |
@@ -261,7 +261,7 @@ host C, it links the machine's own `noun.c`, `nock.c`, `primitives.c`,
 `book.c` and `guestbook.c` rather than a copy of them, and it has two suites:
 `make hoontest` is 40 checks on the host, where the formulas are run by the
 machine's own interpreter and the answers come from the machine's own book, and
-`make teach` is the bridge end to end — the host compiles four expressions, the
+`make teach` is the bridge end to end — the host compiles eleven expressions, the
 text goes down the serial line as characters, the guest's reader reads it, the
 guest's interpreter runs it, and the answers come back.
 
@@ -295,7 +295,10 @@ twenty native integer operations are a tested bank and not proven jets.
 
 The interesting part of this step was not writing the compiler, it was the four
 things the compiler got wrong first. Three were caught by the tests. The fourth
-was caught by reading a refusal, and it is the one worth remembering.
+was caught by reading a refusal, and it is the one worth remembering. The
+spellings in this section are the ones the compiler had while it was finding
+them: `=+` was the push here, and the push is `=>` now, with `=+` the core rune
+(item 24). Nothing below is wrong about the machine; the names have moved on.
 
 **The shift under `=+` is not `2a + 2`.** An address is a leading 1 and then a
 path, so a push on the front puts one more step in front of every path inside
@@ -450,7 +453,7 @@ its own buffer, and rows move, so a core pushed into had a refusal that listed
 which is exactly why nothing failed. The rows carry their labels now, and the
 pushed core's addresses have value tests of their own.
 
-## ## Where the Nock definitions are, and are not
+## Where the Nock definitions are, and are not
 
 The seventeen pending operations want proofs against Nock definitions, and the
 obvious place to look for an authoritative set is the evaluation corpus under

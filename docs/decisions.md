@@ -735,21 +735,30 @@ rather than a scribble, which is what the limits have always been for.
 ## 22. The language is Hoon-shaped, and the shift is not arithmetic
 
 **Decided:** the host compiler reads a small language that borrows Hoon's
-spelling and none of its type system. Ten forms, and each one is a named opcode
-or a refusal:
+spelling and none of its type system. Thirteen forms, and each one is a named
+opcode or a refusal:
 
 | Written | Is |
 |---|---|
 | `42` | the atom 42 (opcode 1) |
 | `/14` | the subject at that tree address (opcode 0) |
+| `arm` | the arm of the innermost core, which is a read of its `/6` |
+| `[a b]` | the same list as `\|(a b)`, written the other way round |
 | `?(a)` | 0 if `a` is a cell, 1 if it is an atom (opcode 3) |
 | `=(a b)` | 0 if the nouns are the same, 1 if not (opcode 5) |
-| `~(c t e)` | `t` if `c` is 0, `e` if `c` is 1 (opcode 6) |
+| `?:(c t e)` | `t` if `c` is 0, `e` if `c` is 1 (opcode 6) |
 | `*(a b)` | call: `a`'s value is the subject, `b`'s value is the formula (opcode 2) |
-| `\|(a b)` | the three-word list `[a b 0]` (two opcode-10 edits) |
+| `\|(a b ...)` | the list `[a b ... 0]`, one opcode-10 edit per thing |
 | `+(a)` | `a` plus one (opcode 8, then opcode 4) |
 | `+(a b)` | `a` plus `b`, and only when both are literals |
-| `=+(a body)` | push `a` on the front and run `body` there (opcode 8) |
+| `=>(a body)` | push `a` on the front and run `body` there (opcode 8) |
+| `~(arm core)` | run the arm that `core` holds, on `core` (opcode 9, axis 6) |
+| `=+(arm sample body)` | a core: `[sample arm 0]`, the arm at `/6` (item 24) |
+
+Three of those rows are not what this item decided, and item 24 is where they
+changed: `~` was the conditional and is an arm call, `=+` was the push and is
+the core rune, and the push is `=>` now, spelled the way Hoon spells it. The
+conditional is `?:` so that `?` can be the cell-or-atom test it always was.
 
 Addresses are checked against the subject the expression will be run on, and an
 address that is not in that shape is refused by name. `+(a b)` is refused for
