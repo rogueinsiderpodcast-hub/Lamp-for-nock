@@ -287,11 +287,20 @@ static void gb_show_session(void);
  * down what one looks like. */
 #define GB_RECORD '%'
 
+/* The first character of a rule.  A rule is a Nock definition sent as text
+ * that claims to be a primitive; it is checked exhaustively over a bounded
+ * domain before it may be used.  decisions.md item 26. */
+#define GB_RULE '!'
+
 /* One record, written to the wire and read back from it, and the restore that
  * reads it.  Both are below; these are here because gb_submit writes one and
  * reads one. */
 static void gb_record(noun line, noun answer);
 static void gb_restore(void);
+
+/* A rule line, and the checking it lives or dies by.  gb_submit routes to it
+ * the way it routes a % to gb_restore. */
+static void gb_rule(void);
 
 /* Everything that happens when a line is finished.  The byte buffer and the
  * echo above are the whole of the terminal handling, and everything worth
@@ -312,6 +321,10 @@ static void gb_submit(void)
         first++;
     if (first < gb_line_len && gb_line[first] == GB_RECORD) {
         gb_restore();
+        return;
+    }
+    if (first < gb_line_len && gb_line[first] == GB_RULE) {
+        gb_rule();
         return;
     }
 
@@ -461,6 +474,364 @@ static void gb_restore(void)
     serial_puts(", answering ");
     noun_print(gb_last(gb_session));
     serial_put_nl();
+}
+
+/* --- the rules (Step 5) --------------------------------------------------- */
+/* A rule line is `! 0 <definition>`: a primitive's bank index and a Nock
+ * formula that claims to be that primitive.  The machine checks the claim
+ * before it may be used -- every pair in the primitive's certified domain,
+ * run by the machine's own interpreter and compared with the native by
+ * noun_equal -- and refuses by name, with the first pair that failed, any
+ * definition that stops, answers a cell, disagrees, or tries to answer by
+ * calling the primitive it defines.  decisions.md item 26.
+ *
+ * The notebook records a rule the way it records a line, with ! where a
+ * session record has %:
+ *
+ *     ! 0 <definition>: 64
+ *
+ * so a rule survives a power cut and is re-verified-- never believed -- on the
+ * next boot.  A line with a colon in it is therefore a record being replayed
+ * and is not echoed as a record again; a rule typed in by hand has no colon
+ * and is echoed, exactly as a session line is.  A record is genuine only if
+ * the domain it claims is the domain the machine certifies. */
+
+static const char *gb_colon_in(u64 from)
+{
+    for (u64 i = from; i < gb_line_len; i++)
+        if (gb_line[i] == ':')
+            return gb_line + i;
+    return NULL;
+}
+
+/* The machine says what a primitive currently is, and how its two possible
+ * answers have actually divided the probes.  `!` alone reports every primitive
+ * with a certified domain; `! 0` reports only the one. */
+static void gb_rule_report(int index)
+{
+    if (index < 0) {
+        for (int i = 0; i < prim_count(); i++)
+            if (prim_rule_domain(i, NULL))
+                gb_rule_report(i);
+        return;
+    }
+    const prim_entry *e = prim_get(index);
+    u64  limit = 0;
+    int  has = prim_rule_domain(index, &limit);
+    noun def = 0;
+    int  installed = prim_rule_state(index, &def);
+
+    serial_puts("  ");
+    serial_puts(e != NULL ? e->name : "?");
+    if (!has) {
+        serial_puts(" has no certified domain, so no rule is accepted for it.\n");
+        return;
+    }
+    serial_puts(": domain a + b < ");
+    serial_put_dec(limit);
+    serial_puts(".  ");
+    serial_puts(installed ? "the rule is installed" : "the C native answers");
+    serial_puts(";  the rule has answered ");
+    serial_put_dec(prim_rule_runs(index));
+    serial_puts(" probes, the native ");
+    serial_put_dec(prim_native_runs(index));
+    serial_puts(".\n");
+}
+
+/* The battery: every pair with a + b < limit, once, in order.  Prints a dot
+ * every 256 pairs so a check that is doing the honest thing can be watched
+ * doing it, and says, on the first pair that failed, exactly what failed.
+ * The definition runs with the machine's own reader and its own interpreter
+ * under the gate, so a rule that tries to answer by calling the primitive it
+ * defines has its probe declined and its own fallback judged instead.  Leaves
+ * the machine's error state clear, because a refusal is not a crash. */
+static int gb_rule_verify(int index, noun def)
+{
+    const prim_entry *e = prim_get(index);
+    u64 limit = 0;
+
+    if (!prim_rule_domain(index, &limit))
+        return 0;
+
+    u64 done = 0;
+    for (u64 a = 0; a < limit; a++) {
+        for (u64 b = 0; a + b < limit; b++) {
+            if (done != 0 && (done & 255u) == 0)
+                serial_putc('.');
+            done++;
+
+            machine_reset_error();
+            noun subject = noun_cons(noun_atom(a),
+                                     noun_cons(noun_atom(b), noun_atom(0)));
+            noun out = 0;
+            prim_rule_gate(index);
+            int rc = nock_run(subject, def, &out);
+            prim_rule_ungate();
+
+            if (rc != NOCK_OK) {
+                const char *reason = nock_crash_reason();
+                machine_reset_error();
+                serial_puts("  no.  the definition stopped at ");
+                serial_puts(e->name);
+                serial_putc('(');
+                serial_put_dec(a);
+                serial_puts(", ");
+                serial_put_dec(b);
+                serial_puts("): ");
+                serial_puts(reason);
+                serial_put_nl();
+                return 0;
+            }
+            if (!noun_is_atom(out)) {
+                machine_reset_error();
+                serial_puts("  no.  the definition answered ");
+                serial_puts(e->name);
+                serial_putc('(');
+                serial_put_dec(a);
+                serial_puts(", ");
+                serial_put_dec(b);
+                serial_puts(") with a cell.\n");
+                return 0;
+            }
+
+            machine_reset_error();
+            u64 nat = prim_call(index, a, b);
+            if (machine_err) {
+                machine_reset_error();
+                serial_puts("  no.  the native itself stopped at ");
+                serial_puts(e->name);
+                serial_putc('(');
+                serial_put_dec(a);
+                serial_puts(", ");
+                serial_put_dec(b);
+                serial_puts("): ");
+                serial_puts(nock_crash_reason());
+                serial_put_nl();
+                return 0;
+            }
+            if (noun_atom_val(out) != nat) {
+                serial_puts("  no.  the definition said ");
+                serial_puts(e->name);
+                serial_putc('(');
+                serial_put_dec(a);
+                serial_puts(", ");
+                serial_put_dec(b);
+                serial_puts(") is ");
+                serial_put_dec(noun_atom_val(out));
+                serial_puts("; the native says ");
+                serial_put_dec(nat);
+                serial_puts(".\n");
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
+
+static void gb_rule(void)
+{
+    u64 at = 0;
+    while (at < gb_line_len && gb_line[at] == ' ')
+        at++;
+    if (at >= gb_line_len || gb_line[at] != GB_RULE)
+        return;
+    at++;
+
+    while (at < gb_line_len && gb_line[at] == ' ')
+        at++;
+    if (at >= gb_line_len) {
+        gb_rule_report(-1);
+        return;
+    }
+
+    if (gb_line[at] < '0' || gb_line[at] > '9') {
+        serial_puts("  no.  a rule names a primitive by its index number:\n");
+        serial_puts("  ! 0 <definition> is a rule claiming to be +add.\n");
+        return;
+    }
+
+    u64 index = 0;
+    while (at < gb_line_len && gb_line[at] >= '0' && gb_line[at] <= '9') {
+        u64 d = (u64)(gb_line[at] - '0');
+        if (index > (NOUN_ATOM_MAX - d) / 10) {
+            serial_puts("  no.  that index is too large for a noun.\n");
+            return;
+        }
+        index = index * 10 + d;
+        at++;
+    }
+    if (index >= (u64)prim_count()) {
+        serial_puts("  no.  the bank has primitives 0 to ");
+        serial_put_dec((u64)(prim_count() - 1));
+        serial_puts(", not ");
+        serial_put_dec(index);
+        serial_puts(".\n");
+        return;
+    }
+
+    while (at < gb_line_len && gb_line[at] == ' ')
+        at++;
+    if (at >= gb_line_len) {
+        gb_rule_report((int)index);
+        return;
+    }
+
+    /* Everything from here is the definition, split by the first colon if there
+     * is one: a colon makes the line a record being replayed, claiming the
+     * domain as its answer. */
+    const char *colon = gb_colon_in(at);
+    u64 end = colon != NULL ? (u64)(colon - gb_line) : gb_line_len;
+
+    while (at < end && gb_line[at] == ' ')
+        at++;
+    if (at >= end) {
+        serial_puts("  no.  a rule needs a definition: ! 0 <definition>\n");
+        return;
+    }
+
+    noun def = 0;
+    const char *why = "";
+    if (gb_parse(gb_line + at, end - at, &def, &why) != GB_PARSE_OK) {
+        serial_puts("  no.  the definition is not a noun the reader takes: ");
+        serial_puts(why);
+        serial_put_nl();
+        return;
+    }
+    if (noun_is_atom(def)) {
+        serial_puts("  no.  a definition has to be a formula, which is a cell,\n");
+        serial_puts("  and an atom is nothing to run.\n");
+        return;
+    }
+
+    if (colon != NULL) {
+        noun claimed = 0;
+        if (gb_parse(colon + 1, gb_line_len - (u64)(colon + 1 - gb_line),
+                     &claimed, &why) != GB_PARSE_OK) {
+            serial_puts("  no.  the record's domain is not a noun the reader takes: ");
+            serial_puts(why);
+            serial_put_nl();
+            return;
+        }
+        u64 limit = 0;
+        if (!prim_rule_domain((int)index, &limit)) {
+            serial_puts("  no.  this primitive has no certified domain at all.\n");
+            return;
+        }
+        if (!noun_is_atom(claimed) || noun_atom_val(claimed) != limit) {
+            serial_puts("  no.  the record claims a domain the machine does not\n");
+            serial_puts("  certify: a rule is only what the machine checked.\n");
+            return;
+        }
+    }
+
+    if (!gb_rule_verify((int)index, def))
+        return;
+
+    prim_rule_set((int)index, def);
+
+    serial_puts("  yes.  ");
+    serial_puts(prim_get((int)index)->name);
+    serial_puts(" is now a rule, sent as text and checked in full: ");
+    u64 limit = 0;
+    prim_rule_domain((int)index, &limit);
+    serial_put_dec(limit * (limit + 1) / 2);
+    serial_puts(" pairs with a + b < ");
+    serial_put_dec(limit);
+    serial_puts(", and it\n");
+    serial_puts("  answered the native on every one.  for those pairs the\n");
+    serial_puts("  machine answers without its C ");
+    serial_puts(prim_get((int)index)->name);
+    serial_puts(".\n");
+
+    /* A record being replayed is not echoed; a rule typed in by hand is, so the
+     * notebook holds it and a later boot can re-verify it. */
+    if (colon == NULL) {
+        serial_putc('!');
+        serial_putc(' ');
+        serial_put_dec(index);
+        serial_putc(' ');
+        noun_print(def);
+        serial_puts(": ");
+        serial_put_dec(limit);
+        serial_put_nl();
+    }
+}
+
+/* The checklist's question about rules: is a rule checked exhaustively over its
+ * whole domain before it is used, is a definition that lies or stops or calls
+ * the thing it defines refused by name, and -- once a rule is installed -- does
+ * the machine answer within the domain by the definition and not by the C
+ * native, and outside it by the C native?  The battery below is the same one a
+ * `!` line runs; the checklist runs it on the real definition once, on every
+ * boot. */
+int gb_rules_ok(void)
+{
+    /* The refusal suite: a lie is refused by the pair it disagreed on, a
+     * definition that stops is refused by what it stopped at, and a definition
+     * that tries to answer by calling the primitive it defines is refused
+     * because its probe was declined and its own fallback was judged. */
+    static const char wrong[]  = "[1 3 0]"; /* the constant 3: disagrees at +add(0, 0) */
+    static const char stopped[] = "[0 0 0]"; /* axis 0: a path that names nothing */
+    static const char selfdef[] = "[11 [0 [1 [[2 3] 0]]] [0 2 0] 0]"; /* hints +add(2,3), replies a */
+    static const char adddef[] =
+        "[9 [126 [[10 [[126 [1 [[6 [[5 [[0 [62 0]] [[1 [0 0]] 0]]] [[6 [[5 [[0 [14 0]] [[0 [2 0]] 0]]] [[9 [126 [[10 [[126 [0 [126 0]]] [[10 [[62 [1 [1 0]]] [[10 [[30 [0 [30 0]]] [[10 [[14 [1 [0 0]]] [[10 [[6 [0 [6 0]]] [[10 [[2 [0 [2 0]]] [[1 [[0 [0 [0 [0 [0 [0 0]]]]]] 0]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] [[9 [126 [[10 [[126 [0 [126 0]]] [[10 [[62 [1 [0 0]]] [[10 [[30 [4 [[0 [30 0]] 0]]] [[10 [[14 [4 [[0 [14 0]] 0]]] [[10 [[6 [0 [6 0]]] [[10 [[2 [0 [2 0]]] [[1 [[0 [0 [0 [0 [0 [0 0]]]]]] 0]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]]] [[6 [[5 [[0 [14 0]] [[0 [6 0]] 0]]] [[0 [30 0]] [[9 [126 [[10 [[126 [0 [126 0]]] [[10 [[62 [1 [1 0]]] [[10 [[30 [4 [[0 [30 0]] 0]]] [[10 [[14 [4 [[0 [14 0]] 0]]] [[10 [[6 [0 [6 0]]] [[10 [[2 [0 [2 0]]] [[1 [[0 [0 [0 [0 [0 [0 0]]]]]] 0]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]]] 0]]]] 0]]] [[10 [[62 [1 [0 0]]] [[10 [[30 [1 [0 0]]] [[10 [[14 [1 [0 0]]] [[10 [[6 [0 [6 0]]] [[10 [[2 [0 [2 0]]] [[1 [[0 [0 [0 [0 [0 [0 0]]]]]] 0]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]]";
+
+    noun a, b, c, d;
+    const char *why = "";
+    u64 limit = 0;
+    int all = 1;
+
+    if (!prim_rule_domain(0, &limit) || limit != RULE_ADD_LIMIT)
+        all = 0;
+    if (prim_rule_state(0, NULL))
+        all = 0;                              /* nothing installed at boot */
+
+    if (gb_parse(wrong, sizeof wrong - 1, &a, &why) != GB_PARSE_OK)
+        all = 0;
+    if (all && gb_rule_verify(0, a))          /* constant 3: fails at +add(0, 0) */
+        all = 0;
+    if (all && prim_rule_state(0, NULL))
+        all = 0;
+
+    if (gb_parse(stopped, sizeof stopped - 1, &b, &why) != GB_PARSE_OK)
+        all = 0;
+    if (all && gb_rule_verify(0, b))          /* axis 0: stops at once */
+        all = 0;
+
+    if (gb_parse(selfdef, sizeof selfdef - 1, &c, &why) != GB_PARSE_OK)
+        all = 0;
+    if (all && gb_rule_verify(0, c))          /* hints +add, then says a: +add(0,1) */
+        all = 0;
+
+    if (gb_parse(adddef, sizeof adddef - 1, &d, &why) != GB_PARSE_OK)
+        all = 0;
+    if (all && !gb_rule_verify(0, d))         /* the real definition passes */
+        all = 0;
+    if (all) {
+        prim_rule_set(0, d);
+
+        /* The counters count for the machine's whole life, so the probes are
+         * judged by what they move: the first must answer by the definition and
+         * move nothing else, the second by the native. */
+        u64 rt0 = prim_rule_runs(0);
+        u64 nt0 = prim_native_runs(0);
+
+        u64 res = 0;
+        machine_reset_error();
+        if (prim_rule_probe(0, 3, 4, &res) != 0 || res != 7)
+            all = 0;
+        if (prim_rule_runs(0) != rt0 + 1 || prim_native_runs(0) != nt0)
+            all = 0;
+
+        machine_reset_error();
+        res = 0;
+        if (prim_rule_probe(0, 2000, 1000, &res) != 0 || res != 3000)
+            all = 0;                          /* outside the domain: the native */
+        if (prim_native_runs(0) != nt0 + 1)
+            all = 0;
+    }
+    machine_reset_error();
+    return all;
 }
 
 /* A blank line asks to be shown the session.  The log is walked here rather
@@ -620,6 +991,11 @@ void gb_run(void)
     serial_puts("  record from the notebook: it is run again, and checked against\n");
     serial_puts("  the answer written beside it.  `make notebook` keeps that file\n");
     serial_puts("  on the host and hands it back at the start of the next boot.\n");
+    serial_put_nl();
+    serial_puts("  a line that starts with ! is a rule: a formula that claims to\n");
+    serial_puts("  be a primitive, checked exhaustively over the domain the machine\n");
+    serial_puts("  certifies before it may be used.  ! 0 <definition> claims\n");
+    serial_puts("  +add, and ! <index> says what that primitive is right now.\n");
     serial_put_nl();
     serial_puts("  > ");
 

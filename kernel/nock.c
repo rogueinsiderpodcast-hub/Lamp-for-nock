@@ -201,8 +201,8 @@ static void jet_maybe(noun hint_head, noun hint_product)
      * clearing the error.  A hint that turns out not to apply is ordinary
      * rather than faulty, so it is counted and not printed. */
     machine_reset_error();
-    u64 result = prim_call((int)index, a, b);
-    if (machine_err) {
+    u64 result = 0;
+    if (prim_rule_probe((int)index, a, b, &result)) {
         jet_declines++;
         machine_reset_error();
         return;
@@ -428,4 +428,22 @@ int nock_run(noun subject, noun formula, noun *out)
     if (out != NULL)
         *out = product;
     return NOCK_OK;
+}
+
+/* A formula run by a jet probe: the interpreter within the interpreter.  When
+ * it is called from inside an evaluation that is already under way it arms
+ * nothing -- the steps, the depth and the tally belong to the run that called
+ * it, and answering by running the interpreter pays that run's budget.  When
+ * there is no evaluation under way (a probe taken at boot, say, or by a
+ * checklist) nobody owns the budget, so it stands a fresh one up, exactly as
+ * nock_run would.  The caller is responsible for the error state -- a probe's
+ * decline is signalled by machine_err, as a native's is. */
+noun nock_apply(noun subject, noun formula)
+{
+    int orphan = (call_depth == 0);
+    if (orphan) {
+        steps_left = step_limit;
+        steps_used = 0;
+    }
+    return nock(subject, formula);
 }

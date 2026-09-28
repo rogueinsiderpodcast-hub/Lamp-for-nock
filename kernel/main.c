@@ -67,6 +67,17 @@ static void rule(const char *title)
 static int checklist_pass;
 static int checklist_total;
 
+/* Guest book internals the checklist asks about.  The machine only claims what
+ * the table says (decisions.md item 11). */
+int gb_reader_ok(void);
+int gb_session_ok(void);
+int gb_journal_ok(void);
+
+/* Rules, which is Step 5: a formula typed at the machine that claims to be a
+ * primitive is checked exhaustively over its certified domain before it may be
+ * used (decisions.md item 26). */
+int gb_rules_ok(void);
+
 static void step(int ok, const char *what)
 {
     serial_puts(ok ? "  [ ok ]  " : "  [FAIL]  ");
@@ -147,6 +158,8 @@ void kmain(u64 boot_params_phys)
          "a formula typed at the machine runs, and what it leaves behind matters");
     step(gb_journal_ok(),
          "a record the machine wrote can be read back, run, and checked against the answer it claims");
+    step(gb_rules_ok(),
+         "a rule sent as text is checked exhaustively before it is used, a lie is refused by name, and the counters tell which path answered");
     step(failures == 0, "every self-test check passed");
 
     int lit = failures == 0 && checklist_pass == checklist_total;

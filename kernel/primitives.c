@@ -207,3 +207,128 @@ u64 prim_call(int index, u64 a, u64 b)
         b = 0;
     return entry->fn(a, b);
 }
+
+/* --- rules (Step 5) ------------------------------------------------------
+ * A rule is a Nock formula, received as text, that claims to be a primitive.
+ * The machine never believes one: it is checked exhaustively over a bounded
+ * domain -- every pair in the domain, run by the machine's own interpreter
+ * and compared with the native by noun_equal -- before it may be used, and it
+ * is only used inside the bound the check covered.  See decisions.md item 26.
+ *
+ * The domain is a triangle, the pairs with a + b < RULE_ADD_LIMIT, and it is
+ * settled here because it is the machine's contract rather than the text's:
+ * a rule is only accepted for a primitive the machine knows how to bound, and
+ * a primitive with no domain can be sent all the rules it likes and every one
+ * is refused without being read.  The limit was chosen as the largest triangle
+ * whose whole battery still settles in the guest's arena: item 23's definition
+ * costs 275 + 21*(a + b) cells a case, the triangle has N*(N+1)/2 cases, and
+ * N = 64 settles at about 2.4 million cells, comfortably under the guest's
+ * 8.3 million and far over the host's 131 thousand -- so this is a check the
+ * machine can perform and the host could not. */
+
+struct rule_slot {
+    noun def;    /* the checked definition, or 0 when none is installed */
+    u64  limit;  /* the certified domain, or 0 when there is no domain */
+};
+
+/* One slot per bank entry; the designator gives +add (index 0) its domain and
+ * every other primitive a zero limit, which means "no checkable domain". */
+static struct rule_slot rule_slots[sizeof(bank) / sizeof(bank[0])] = {
+    [0] = { 0, RULE_ADD_LIMIT },
+};
+
+static u64 rule_runs[sizeof(bank) / sizeof(bank[0])];
+static u64 native_runs[sizeof(bank) / sizeof(bank[0])];
+
+#define RULE_LEN (sizeof(rule_slots) / sizeof(rule_slots[0]))
+
+/* The primitive whose rule is currently answering, or -1.  While it is set, a
+ * probe at that primitive declines without touching the native -- a definition
+ * of a thing may not answer by calling the thing, whether or not it is
+ * installed yet -- and a declined probe is ordinary in this machine, so the
+ * definition's own fallback formula runs and the battery judges that. */
+static int rule_active = -1;
+
+int prim_rule_domain(int index, u64 *limit)
+{
+    if (index < 0 || index >= (int)RULE_LEN)
+        return 0;
+    if (rule_slots[index].limit == 0)
+        return 0;
+    if (limit != NULL)
+        *limit = rule_slots[index].limit;
+    return 1;
+}
+
+int prim_rule_state(int index, noun *def)
+{
+    if (index < 0 || index >= (int)RULE_LEN)
+        return 0;
+    if (def != NULL)
+        *def = rule_slots[index].def;
+    return rule_slots[index].def != 0;
+}
+
+void prim_rule_set(int index, noun def)
+{
+    if (index < 0 || index >= (int)RULE_LEN)
+        return;
+    rule_slots[index].def = def;
+}
+
+void prim_rule_gate(int index) { rule_active = index; }
+void prim_rule_ungate(void)    { rule_active = -1; }
+
+u64 prim_rule_runs(int index)
+{
+    if (index < 0 || index >= (int)RULE_LEN)
+        return 0;
+    return rule_runs[index];
+}
+
+u64 prim_native_runs(int index)
+{
+    if (index < 0 || index >= (int)RULE_LEN)
+        return 0;
+    return native_runs[index];
+}
+
+/* The probe a step-1 hint is answered by.  Its shape is the native's: return
+ * 0 with machine_err clear and *result set when it answers, return non-zero
+ * with machine_err set when it declines.  Which path answers:
+
+ *   - no rule installed, or the operands outside the domain: the C native;
+ *   - a rule installed and the operands inside the domain: the rule's
+ *     definition, run by the interpreter with the live step and depth budget,
+ *     and declined (never the native) if it stops or answers a cell, or if it
+ *     probes the primitive it defines. */
+int prim_rule_probe(int index, u64 a, u64 b, u64 *result)
+{
+    if (index < 0 || index >= (int)RULE_LEN)
+        return 1;
+    if (rule_active == index) {
+        machine_crash("a rule may not answer by calling the primitive it defines");
+        return 1;
+    }
+    if (rule_slots[index].limit != 0 && rule_slots[index].def != 0
+        && a + b < rule_slots[index].limit) {
+        rule_active = index;
+        noun subject = noun_cons(noun_atom(a),
+                                 noun_cons(noun_atom(b), noun_atom(0)));
+        noun product = nock_apply(subject, rule_slots[index].def);
+        rule_active = -1;
+        if (machine_err || !noun_is_atom(product)) {
+            if (!machine_err)
+                machine_crash("a rule answered with a cell");
+            return 1;
+        }
+        rule_runs[index]++;
+        *result = noun_atom_val(product);
+        return 0;
+    }
+    *result = prim_call(index, a, b);
+    if (machine_err)
+        return 1;
+    native_runs[index]++;
+    return 0;
+}

@@ -16,7 +16,7 @@ of them still leaves something real.
 | **2. Guest Book** | You type at it, it answers, and it remembers everything you did this session. | 1 + 2, writing rather than mutating | **done — green** |
 | **3. Teacher** | You write instructions in a real language, and they run. | 3, code is data | **green — a Hoon-shaped language with cores, names and a loop** |
 | **4. Notebook** | The guest book survives the power being turned off. | durability | **green — the log is written down as it runs, and replayed on the next boot** |
-| **5. New Rules** | The machine rewrites its own behaviour from text you send it, and cannot be broken by it. | 5, it cannot be lied to | not started |
+| **5. New Rules** | The machine rewrites its own behaviour from text you send it, and cannot be broken by it. | 5, it cannot be lied to | **green — a rule is text, checked in full before it is allowed to be behaviour** |
 | ~~Wire~~ | ~~Networking~~ | | deferred indefinitely |
 
 **Step 3 is the bridge.** The compiler stays on the host: you type into
@@ -82,7 +82,79 @@ All three were checked against sabotage rather than trusted: emptying
 `gb_record` fails phase 1, and making the answer comparison a constant 0 fails
 phase 3.
 
-## Where Step 1 stands
+## Where Step 5 stands
+
+**Green.** The machine can now rewrite part of its own behaviour from text sent
+down the same wire as everything else, and it checks the text in full before it
+is allowed to mean anything. The line is `! 0 <definition>`: a rule names the
+primitive it claims to be, and the machine proves the claim over that
+primitive's certified domain before the rule is installed, by running every pair
+in the domain with its own interpreter on its own hardware and comparing each
+answer with its own native. Text cannot break the machine because there is never
+a step at which a rule is believed: every path into behaviour is a refusal. Item
+26 is the whole design, written down before the code, and the machine's own
+checklist says it on every boot.
+
+The first rule is `+add`, because that is the one definition the machine already
+carries (item 23). Its certified domain is the triangle `a + b < 64` -- 2080
+pairs, the largest triangle whose exhaustive battery still settles in the arena
+-- and the battery settles near 2.4 million cells, which fits the guest arena
+and is far over the host's. This is a check a bare-metal machine can perform and
+its own workstation cannot: the attempt ran out of arena at `+add(2, 58)`, so
+`make rules-test`, like everything else, is the machine testing itself.
+
+**The counters are the proof that the split took.** Outside the domain the
+native answers, inside it the definition does, and the machine counts per
+primitive how many probes each path answered. The boot checklist runs one probe
+inside the domain and one outside it and asserts the split by the *deltas*: the
+counters are machine-lifetime, the self-test's own jets run before any rule
+exists, so `native_runs` starts at 2 and the assertion is `+1` on each side
+rather than an absolute number. `!` alone reports the split on demand; live, the
+rule answered 9 + 5 = 14 and the native 1000 + 2000 = 3000, and the report said
+"the rule has answered 3 probes, the native 5". The session evaluates a line's
+answer twice (once for the entry, once for the new session), which is
+idempotent, so a jetting line fires twice and gains two probes per line -- that
+is measured and said, not hidden.
+
+**Refusals are by name.** The ways to be wrong are each named with the pair that
+caught them: a definition that lies (`+add(0, 0) = 3`), a definition that stops
+(tree address 0 names no noun), and a definition that computes the answer by
+hinting the very primitive it claims to be. The last one is a decline, not a
+crash -- while the battery runs and while the rule is in use, a hint at the
+primitive being defined declines and the definition's own fallback is judged,
+because a declined probe is a normal thing in this machine, not a bug. A def
+that passed the battery by calling the native through the fallback would have
+had to be right on all 2080 pairs to pass, at which point hinting was pointless.
+`+add` is the only primitive with a certified domain; a rule claiming to be, say,
+`+mul` is refused by name before it is read, because a claim the machine does
+not know how to check is a premise it declines to take.
+
+**A rule is a record.** The same `claim: answer` shape as a `%` line, with the
+domain as the answer half: `! 0 <definition>: 64`. On a later boot the notebook
+restore feeds it back and the machine re-runs the battery rather than believing
+the record -- restore is a check, never an act of trust -- and replay does not
+echo or re-write a record, so a notebook does not double itself on every boot. A
+record claiming a domain the machine does not certify (`: 65`) is refused by
+name.
+
+`make rules-test` is the claim, run from `make check`, and it is checked the way
+the feature is a claim about: the definition's text in the Makefile is the same
+992 characters item 23 wrote down, and the machine's own echo of the installed
+rule is required to be byte-for-byte identical to it -- a drift between the two
+copies is a failed build rather than a typo. The test boots with the rule typed
+at it, watches `+add(9, 5) = 14` answered in-domain and `+add(1000, 2000) =
+3000` out of it, reads the counters, boots again with only the notebook to go on
+and requires the record to be re-verified rather than trusted, then refuses a
+lying domain and a lying definition by name. The `!` grammar was deliberately
+not given a host unit test -- `gb_rule` reads the machine's static line buffer,
+so the coverage is the checklist's own 2080-pair battery plus this wire-level
+test, which is what a claim about a running machine should be.
+
+**What it does not do, said plainly.** No opcode changed and no arithmetic
+changed; the compiler's refusal of `+(a b)` for runtime operands stands; there
+is no way to remove an accepted rule, and the machine says so (a later step);
+and a bounded battery is a bounded proof -- for `a + b < 64` the machine does
+not need its `+add` native, and for everything else it still does (item 26).
 
 **Green.** `make test` gives 139 checks, 0 failing, `LAMP: LIT`, and a checklist
 of 12 -- 11 of Step 1's own, plus the one Step 4 added. The machine boots into
@@ -222,9 +294,10 @@ could be read:
 
 ## Where Step 2 stands
 
-**Done.** The self-test is 262 checks, 0 failing, `LAMP: LIT`, checklist 12 of 12
--- the eleventh being the new one, that a formula typed at the machine runs and
-what it leaves behind matters.  It was checked by breaking the count increment
+**Done.** The self-test is 262 checks, 0 failing, `LAMP: LIT`, checklist 13 of 13
+-- the eleventh having been the one that pulled this step out of the red, that a
+formula typed at the machine runs and what it leaves behind matters. The rules
+check, item 13, is Step 5's own.  It was checked by breaking the count increment
 and watching the lamp go dark, because a checklist item that cannot fail is a
 sentence in a list rather than a check.
 A line of text typed at the machine comes back as the noun it is, a line that is

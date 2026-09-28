@@ -1028,10 +1028,12 @@ each replayed record's answer is compared against what the notebook says it was,
 with `noun_equal` and not by comparing text. A record that does not reproduce is
 reported by name and by value and the session is left alone, because a session
 restored from a notebook that has been edited by hand is worse than a session
-that was never restored at all. This is not Step 5's "cannot be lied to" -- that
-is about the machine rewriting itself, and it is not started. It is one check,
-in one direction, on the one stream Step 4 adds, and it is here because a
-restore nobody checks is a restore nobody should trust.
+that was never restored at all. This is not Step 5's "cannot be lied to" -- that is about the machine rewriting
+itself. A `!` record now gets the strong form, because item 26's replay re-runs
+the battery rather than believing the recorded answer; a `%` record still has
+only this one check, in one direction, and an attacker who edits both halves of
+it is outside what this step claims. It is here because a restore nobody checks
+is a restore nobody should trust.
 
 **Replay does not write records.** A record fed in is not echoed as a record
 back out, because the host appends every record it sees to the notebook and a
@@ -1047,3 +1049,119 @@ and nothing is written then; `make notebook-test` kills the machine with SIGKILL
 and reads the notebook afterwards, which is the only test of this claim that is
 worth having, because a save-on-exit feature would pass a test that shut down
 politely and fail this one.
+
+## 26. A rule is text, and a rule is checked before it is used
+
+**Decided:** Step 5 makes the machine able to rewrite part of its own behaviour
+from text, and keeps it unbreakable by that text. The machine has one interface,
+the serial line, and the guest book reads it, so a rule for the machine arrives
+where a line arrives: it is typed or pasted at the same prompt as everything
+else, prefixed with `!`. A rule names a primitive and carries a Nock formula that
+claims to be that primitive. Before it may be used, the machine checks the claim
+against its own native, exhaustively, over a finite domain, with its own
+interpreter, on its own hardware -- every pair in the domain is run and compared,
+and the comparison is `noun_equal`, the same check the notebook uses. Text cannot
+break the machine because the text is never trusted: it is data run by the
+step- and arena-bounded interpreter that everything else is run by, and a rule
+that does not pass is refused by name, not applied.
+
+**Why a domain at all.** Item 23 wrote down a Nock definition of `+add` -- a
+loop that counts a and then b, none of the twenty allowed through a jet, only
+opcode 4 and opcode 5 and a core calling its own arm -- and the machine's own
+tools measured it. The definition's cost is exactly linear: one case of
+`+add(a, b)` takes 45 + 24·(a + b) interpreter steps and settles 275 + 21·(a + b)
+cells, so it is always honest about what it will cost. But the loop cannot sum
+everything: it stops, with `call depth exceeded`, somewhere past `a + b ≈ 3300`
+(bisect: 3200 runs, 3400 stops), because every turn spends a slice of the
+10000-frame call depth. A definition that stops somewhere cannot be a
+definition of everything. The honest shape of the claim is therefore bounded: **the
+machine's `+add` is a definition on the triangle `a + b < 64`, and the C native
+outside it.** The bound is a fact about the machine, not a decoration: 64 was
+chosen as the largest triangle whose exhaustively-checked battery still settles
+in the arena, and it is a complete enumeration over that triangle, so the claim
+is a proof over the domain rather than a sample of it.
+
+**What the machine does, in order, when it is sent a rule.** The line is
+`! 0 <definition>`, where `0` is the bank index of `+add` (the machine names its
+primitives by index, as its jets do). The machine:
+
+1. Looks up the primitive and its certified domain. A primitive with no domain
+   in the machine's table is refused by name: `+mul` has no bounded domain yet,
+   so a rule claiming to be `+mul` is a claim the machine does not know how to
+   check, and it is refused without being read. This is the machine declining to
+   take a lie's premise.
+2. Reads the definition with its own reader, the same one that reads a typed
+   line. A definition that is not one noun is refused with the reader's reason.
+   A definition that is an atom is refused, because a formula is a cell and
+   nothing else is.
+3. Runs the battery: every pair in the domain, in order, once, with a fresh
+   interpreter budget, on the subject `[a b 0]` the way item 23's definition is
+   shaped to read it. Four kinds of failure are each named with the first pair
+   that failed: the definition stopped (with the interpreter's reason), it
+   answered a cell, the native itself stopped, or it answered a different atom
+   from the native's, each reported as `+add(a, b)`. The battery is about 2080
+   pairs for the domain and settles near 2.4 million cells, which is under the
+   guest's arena and far over the host's, so this is a check the machine can
+   perform and the host could not.
+4. Only then installs it, and says what is now true: the primitive, the domain,
+   and that the native was answered on every pair.
+
+**A rule may not call the primitive it defines.** The failing definition most
+worth naming is the one that computes its answer by hinting the very primitive
+it claims to be -- that is not a definition, it is a native wearing a formula.
+While the machine is running the battery, and again while a rule is in use, a
+hint at the primitive being defined is treated as a probe that declines, exactly
+like a native that refuses a case, so the definition's own fallback runs and the
+battery compares *that*; installation only passes if the fallback is right on the
+whole domain, in which case the hint was a no-op and there is nothing to hide.
+Refusing the hint outright would be easier and is not done, because a declined
+probe is a normal thing in this machine, not a crash.
+
+**The native is kept, and the machine knows which path answered.** Outside the
+domain the native is still the answer, and inside it the definition is -- both
+were established equal by the battery, so the machine never answers a different
+number than its native would have answered in-domain, which is what lets the
+rule exist without breaking determinism. The machine counts, per primitive, how
+many probes its definition answered and how many its native did, and the
+checklist proves on every boot that a probe inside the domain ran the
+definition and not the native. This is the one measurable way the trust base
+shrinks: for `a + b < 64`, the machine does not need its own `+add` native at
+all.
+
+**A rule is a record.** The notebook holds everything the machine was told, and
+a rule is something the machine was told, so a rule is written down as a record
+too. The record format is the same `claim: answer` shape Step 4 uses, with `!`
+where a session record has `%`, and the answer half is the certified domain:
+
+```
+! 0 <definition>: 64
+```
+
+On a later boot the host feeds the notebook back and the machine recognises a
+`!` line: it re-runs the battery rather than believing the record, compares the
+claimed domain with the certified one, and only then reinstalls. Replay
+re-verifies, because that is the Step 4 doctrine applied to rules -- restore is
+a check, never an act of trust. A rule the battery cannot re-certify is refused
+with its reason, and so is a record claiming a domain the machine does not
+certify. As with session records, replay does not write the rule out again, so a
+notebook does not double itself on every boot.
+
+**What a rule is not.** This step adds no opcode and changes no arithmetic. A
+rule cannot replace the interpreter's own steps, and a rule for `+mul` is
+refused by name until a domain for it is decided. There is no way to send a rule
+away once it is accepted -- removal is deliberately left to a later step, and the
+machine says so. And the compiler's refusal of `+(a b)` for run-time operands
+stands: the values are unknown at compile time, so the compiler cannot know
+whether they fall in a domain the machine certifies, and a formula that relies on
+addition outside the domain relies on the unproven native exactly as it did
+before this step. The rule changes what the machine can claim about itself, not
+what a compiler can promise about a formula.
+
+**Why the machine cannot be broken by a rule.** There is no code to break. A
+rule is a noun, run by the same bounded interpreter as a typed line, and every
+path before it becomes behaviour is a refusal. Its definition must survive the
+battery, determinism is preserved by construction, and the one re-entrant hazard
+-- a definition calling the primitive it defines -- is a decline that the battery
+sees and the fallback then accounts for. The arena and the step limit bound even
+the attempts, and a refused rule leaves the machine exactly as it found it,
+never half-applied.

@@ -2,9 +2,10 @@
 
 A freestanding Nock machine. It boots, it evaluates Nock, it tests itself, it
 prints the result, it halts; it opens a guest book that remembers everything you
-did this session; and it runs instructions written in a small Hoon-shaped
-language that a program on the host compiles into the bracket text the guest
-already knows how to read.
+did this session; it runs instructions written in a small Hoon-shaped language
+that a program on the host compiles into the bracket text the guest already
+knows how to read; and it rewrites part of its own behaviour from text you send
+it, checking that text in full before it is allowed to mean anything.
 
 Nock is a 300-word specification of a combinator calculator. It is the layer
 Urbit's Hoon compiles down to, and it is small enough to read in full and
@@ -13,7 +14,7 @@ implement in full. Lamp implements all of it, from nothing, on a serial port.
 ```
 $ make test
 ...
-  checklist: 12 of 12 done
+  checklist: 13 of 13 done
   LAMP: LIT
 ```
 
@@ -24,16 +25,19 @@ No operating system, no libc, no bootloader, no disk, no network. The only piece
 of hardware it touches is the 16550 serial port at 0x3f8, polled, one byte at a
 time.
 
-The whole machine is 2,514 lines, counting non-blank lines with `/* */` and
-`//` comments stripped: 133 of assembly to reach long mode, 1,411 of C, 852 of
-tests, and 118 of headers. `make lines` runs the count, so the figure is a
+The whole machine is 2,906 lines, counting non-blank lines with `/* */` and
+`//` comments stripped: 133 of assembly to reach long mode, 1,793 of C, 852 of
+tests, and 128 of headers. `make lines` runs the count, so the figure is a
 command and not a claim. (Stated that way because the previous figure, 1,991,
 could not be reproduced by any counting method and was therefore not worth
 carrying, and because a number nobody can re-derive is a number nobody should
 trust: the method is `tools/lines.awk`, and it is awk because a `/*` comment can
 open on one line and close on another, which any per-line filter gets wrong.
 The 852 of tests are 262 checks over the noun layer, the interpreter, the
-primitives, the reader and the book; the host compiler in `tools/hoon.c` is 951
+primitives, the reader and the book; the rules claim is not in them, because the
+2080-pair battery fits the machine's arena and not the host's, so it is made
+in-kernel, by the checklist item that runs the battery and by `make rules-test`.
+The host compiler in `tools/hoon.c` is 951
 lines and is *not* in this figure, because it is not part of the machine — it is
 the thing that feeds it, and neither is `tools/jet-proofs.c`.) It
 implements Nock 4K — all twelve opcodes — over a noun representation where
@@ -53,13 +57,14 @@ newline. Nothing else does.
 make        # build build/boot.elf and build/boot.bin
 make run    # boot it, watch the serial line
 make test   # boot it, fail the build if any check fails
-make check  # all four suites: machine, compiler, jet proofs, notebook
+make check  # all five suites: machine, compiler, jet proofs, notebook, rules
 make hoontest  # the host compiler's own checks
 make proofs  # the native primitives against their Nock definitions
 make teach  # compile eleven expressions and watch the guest run them
 make notebook  # run the guest book with a notebook on the host (Step 4)
 make notebook-test  # SIGKILL the machine, reboot, and check the session came back
 make notebook-forget  # throw the notebook away, on purpose
+make rules-test  # a rule sent as text, checked in full, re-verified from the notebook
 make debug  # boot it with QEMU stopped at the reset vector
 make lines  # count the machine's lines, the way this README counts them
 make clean
@@ -167,6 +172,16 @@ would pass a test that shut down politely and fail this one. A record that lies
 about its answer is refused by name and the session is left alone, so a
 hand-edited notebook cannot quietly become a session.
 
+**Step 5 is in:** `! 0 <definition>` typed at the same prompt as everything else
+is a rule -- a Nock formula claiming to be a primitive. Before it may be used,
+the machine checks the claim on the wire: it runs every pair in the primitive's
+certified domain (`a + b < 64` for `+add`, 2080 pairs, near 2.4 million cells)
+with its own interpreter and compares each answer with its own native. Only then
+is the rule installed and written down as a record, and on a later boot the
+record is re-verified rather than believed. Inside the domain the rule answers,
+outside it the native does, and the machine counts and reports which path
+answered. `make rules-test` is the claim, run from `make check`.
+
 ## Layout
 
 ```
@@ -219,6 +234,13 @@ This matters more than the feature list, so it is stated plainly.
 - the notebook, in `make notebook-test`: a SIGKILL mid-session, a reboot, and a
   session that came back with its history -- plus a record whose answer does not
   reproduce, which is refused by name and leaves the session alone
+- the rules, in `make rules-test`: a rule typed at the machine is checked in
+  full (all 2080 pairs of `a + b < 64`) before it is installed, jetted answers
+  come from the rule in-domain and from the C native out of it with the counters
+  to prove which, a `!` record fed back on a later boot is re-verified rather
+  than trusted, and a record or definition that lies is refused by name -- with
+  the definition's 992 characters in the Makefile required to match the machine's
+  own echo byte for byte
 - three of the twenty primitives against their Nock definitions, in `make proofs`:
   `+inc`, `+eq` and `+not` are read by the machine's own reader, printed back by
   the machine's own printer, run by the machine's own interpreter, and required to
@@ -252,9 +274,12 @@ This matters more than the feature list, so it is stated plainly.
   reading of the rules, so a misreading would not be caught (item 11)
 - that the notebook on the host is not tampered with between boots. A restore
   checks every record against the answer written beside it and refuses one that
-  does not reproduce, which catches a wrong record, and it is not a proof
-  against an attacker who can edit both halves: that is Step 5's "cannot be lied
-  to", and Step 5 has not been started (item 25)
+  does not reproduce -- for a `!` record it re-runs the battery rather than
+  believing the answer at all -- and it is still not a proof against an attacker
+  who can edit both halves of a `%` record, or swap one rule definition for a
+  different one that still passes the battery. Those are the remaining edges of
+  Step 5's "cannot be lied to", and a `!` record that claims a domain the
+  machine does not certify is refused by name (items 25 and 26)
 
 None of these are hard, and none of them is the guest book: the session is a
 noun and the step is a formula, so what is left here is a question about Hoon
@@ -273,6 +298,10 @@ Step 2 is the guest book: a real program inside this machine that computes its
 own next state from its own history, and remembers everything you did this
 session. Step 3 is the bridge — a Hoon compiler running on the host, so that
 the instructions you type are written in a language rather than in brackets.
+Step 5 is where behaviour stops being built-in: the machine can accept a Nock
+definition of one of its own primitives as text, prove it over a bounded domain,
+and use it — a very small step toward a machine whose trust base is what it has
+acted on rather than what it was born with.
 
 ## Licence
 

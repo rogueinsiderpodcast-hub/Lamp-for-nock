@@ -96,6 +96,12 @@ void  noun_print(noun n);
 
 void        nock_init(u64 step_limit);
 int         nock_run(noun subject, noun formula, noun *out);
+/* Run a formula on a subject inside a run that has already started, sharing its
+ * step and depth budgets and its step tally.  A jet that answers by running
+ * the interpreter -- a Step 5 rule -- must cost its caller real steps, or a
+ * definition could hide its work from the budget the enclosing formula paid
+ * for.  See decisions.md item 26. */
+noun        nock_apply(noun subject, noun formula);
 const char *nock_crash_reason(void);
 u64         nock_steps_used(void);
 u64         nock_jet_fires(void);
@@ -187,6 +193,25 @@ const prim_entry *prim_get(int index);
 const prim_entry *prim_find(const char *name);
 int             prim_index(const char *name);
 u64             prim_call(int index, u64 a, u64 b);
+
+/* Step 5: a primitive may sometimes be answered by a Nock definition the
+ * machine checked exhaustively over a bounded domain, instead of by the C
+ * native.  The domain lives here and is the machine's own contract: a rule is
+ * only accepted for a primitive the machine knows how to bound, and is only
+ * used where the bound says the check ran.  decisions.md item 26. */
+int  prim_rule_domain(int index, u64 *limit); /* 1 if a bounded domain exists */
+int  prim_rule_state(int index, noun *def);   /* 1 if a rule is installed */
+void prim_rule_set(int index, noun def);      /* installed after the battery */
+void prim_rule_gate(int index);               /* battery mode: index is being checked */
+void prim_rule_ungate(void);
+int  prim_rule_probe(int index, u64 a, u64 b, u64 *result);
+u64  prim_rule_runs(int index);               /* probes a rule's definition answered */
+u64  prim_native_runs(int index);             /* probes the C native answered */
+
+/* The one certified domain there is (decisions.md item 26): the machine's +add
+ * is a definition on the triangle a + b < RULE_ADD_LIMIT, chosen as the largest
+ * whose whole battery still settles in the guest's arena. */
+#define RULE_ADD_LIMIT 64u
 
 /* --- main.c ------------------------------------------------------------ */
 
