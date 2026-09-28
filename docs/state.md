@@ -348,8 +348,7 @@ rediscover them.
 
 ### What is not here
 
-No loops, so no Hoon recursion: `=+(a ~(c =+(a b) 0))` is the shape every
-recursion takes and it cannot be written. No run-time addition, on purpose. No
+No run-time addition, on purpose. No
 types beyond "an address the session has" and "a value the machine can put in a
 noun", no user-defined cores, and nothing that could grow past a line of 4096
 characters.
@@ -417,6 +416,28 @@ read at run time, because no formula can obtain a native's value and no opcode
 combines two values. The next step in the language is therefore cores and names as
 features -- `=+(a b)` is worth being able to write, and item 23 says what one
 costs -- rather than as a proof that is going to arrive later.
+
+## Cores, names, and a loop
+
+`=+(arm sample body)` builds `[sample arm 0]`, so `arm` is at `/6` and the
+sample's things are `/4`, `/10`, `/22` -- reads in the outer subject, evaluated
+when the body is compiled. A name in a body is a read of `/6`; a name in a
+sample is refused, because a sample is compiled where that name means nothing.
+Six calls of the loop below count up to five and answer with the limit, at 17
+steps and 7 nouns a call, with the formula the same size as the count grows:
+
+```
+=+(arm |(0 5) ?:(=(/4 /10) /10 ~(arm |(|(+(/4) /10) arm))))
+```
+
+The second half of this is a compiler check that came out of a wrong loop: the
+same source with the arm in front of the new sample answered `5` instead of `1`
+on every limit and said nothing, because `/4` read the arm and `/10` read the
+counter, and the tests had been written from its answers. A sample that goes
+back into a core is now walked again and compared with the walk that gave the
+arm's addresses -- addresses and nesting, not the expressions filling them -- and
+a mismatch is a refusal naming both shapes. `docs/decisions.md` item 24 has the
+measurements, the old expression, and why the machine was right throughout.
 
 ## The questions waiting on the bridge
 

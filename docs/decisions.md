@@ -857,3 +857,77 @@ not unblock `+(a b)`, and it is not on the way to unblocking it -- the blocker i
 that no formula can obtain a native's value (item 10) and that no opcode combines
 two values. What it buys is the shape of a core here, measured, for whoever writes
 `=+(a b)` in the language next.
+
+## 24. A core is `[sample arm 0]`, and a sample that goes back in has to go back the same way round
+
+Item 23 wrote down a core whose arm was at `/126`, which is a flat core with six
+fields and one of the largest address strings in the language. Writing the loop
+in the language turned out to want a different shape, so the rune is drawn like
+this instead:
+
+```
+=+(arm sample body)
+```
+
+where `sample` is a `|`, and the core the compiler builds is a two-thing list
+`[sample arm 0]`. So `arm` is at `/6` and the sample is at `/2`, and the sample's
+things are one head-step further out: the first thing of `|(0 5)` is `/4`, its
+second is `/10`, a third would be `/22`, and each of those is a read or a
+constant in the *outer* subject, evaluated when the body is compiled, not when
+the arm is called. A name in a body is a read of `/6` -- the same address for
+every core the compiler is inside, which is why `arm` is a name here and a
+`/6` there -- and the compiler refuses a name in a sample, because a sample is
+compiled in the outer subject where that name means nothing.
+
+**The loop.** Six calls, counting up to five, and the answer is the limit it was
+given:
+
+```
+=+(arm |(0 5) ?:(=(/4 /10) /10 ~(arm |(|(+(/4) /10) arm))))
+```
+
+The new core in the recursive call is built the same way round: a new sample in
+front, the same arm behind. `arm` on the right of the inner list is a read of
+`/6`, so the arm goes back into the core it came from rather than travelling
+through the sample -- which is what makes the sample's shape stay put, and what
+keeps the formula the same size as the count grows:
+
+| calls | steps | nouns | formula characters |
+|---|---|---|---|
+| 2 (limit 1) | 32 | 103 | 367 |
+| 6 (limit 5) | 100 | 131 | 367 |
+| 1001 (limit 1000) | 17015 | 7096 | 370 |
+| 10001 (limit 10000) | 84968 | 35075 | 370, then `call depth exceeded` |
+
+So 17 steps and 7 nouns per call, the formula constant, and `NOCK_MAX_DEPTH`
+(10000) rather than memory or the reader is what ends a long loop -- the
+depth limit is the interpreter's own C recursion, one frame per call, and it is
+the same wall the `+add` definition in item 23 hit at 3000 turns. This is the
+shape of a loop in the language now, measured, and `make teach` runs it as its
+fifth line so the claim is on the machine's own answer rather than the host's.
+
+**The check that came out of it, which is the reason this item is here.** The
+first version of that loop was
+
+```
+=+(arm |(0 5) ?:(=(/4 /10) 1 ~(arm |(arm |(+(/4) /10)))))
+```
+
+and it answered `5` where it should have answered `1`, on every limit, with no
+complaint from anywhere. The arm was put in front of the new sample, so `/4` --
+the counter -- read the arm, and `/10` -- the limit -- read the counter, and the
+loop compared the arm with a number for a thousand iterations and then answered
+a limit it had never compared against anything. It passed the tests that were
+written for it, because the tests were written from its answers. There is no
+soundness bug in the machine here: the noun was exactly the noun the source
+said, and the compiler said what it meant. The bug was that nobody had written
+down what the new sample had to look like.
+
+So a sample that goes back into a core is walked again and compared with the
+walk that gave the addresses the arm uses, counting addresses and nesting and
+not the expressions that fill them -- a sample that counts itself is a read
+where the one it came from was a number, and that is the whole point of
+rebuilding one. Mismatch is a refusal naming both shapes, and an arm called on
+anything that is not `[sample arm 0]` is a refusal too, rather than a noun the
+machine would find by descending into an atom. The old expression is in the
+refusals now, where it used to be in the passing cases.

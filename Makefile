@@ -164,15 +164,21 @@ proofs: $(PROOFS)
 # reader reads it, the guest's interpreter runs it, and the answer comes back.
 # Nothing here is a socket and nothing is a protocol.
 #
-# Four lines, and the answers are a claim about four lines of a session rather
-# than four independent answers.  Line 2 answering 2 means the count read at /14
+# Five lines, and the answers are a claim about five lines of a session rather
+# than five independent answers.  Line 2 answering 2 means the count read at /14
 # was 1, so line 1 was typed, read, run and remembered; line 4 answering 4 means
 # the count was 3, so all three of the lines before it were.  Line 3 answers 1
 # on its own, and is the only one that does not read the count -- the session
 # carrying is what proves it arrived.
+#
+# Line 5 is the loop, counting up to three and answering with the limit it was
+# given.  It is one line of source no matter how far it counts, and the machine
+# walks it at run time; on the host the same formula costs 17 steps and 7 nouns
+# per call, and a thousand calls fit inside the 10000-frame depth limit while ten
+# thousand do not.  See decisions.md item 24.
 teach: $(KERNEL) $(HOON)
 	@{ \
-	    printf '=+(/14 ~(/2 1 2));=+(/14 ~(/2 1 2));*(|(1 3) |(0 2));+(/14)\n' \
+	    printf '=>(/14 ?:(/2 1 2));=>(/14 ?:(/2 1 2));*(|(1 3) |(0 2));+(/14);=+(arm |(0 3) ?:(=(/4 /10) /10 ~(arm |(|(+(/4) /10) arm))))\n' \
 		| tr ';' '\n' \
 		| while read -r e; do ./$(HOON) "$$e" || exit 1; printf '\n'; done; \
 	    printf '\004'; \
@@ -183,7 +189,7 @@ teach: $(KERNEL) $(HOON)
 	    cat $(BUILD)/teach.log; exit 1; \
 	fi; \
 	i=1; failed=0; \
-	for want in 1 2 1 4; do \
+	for want in 1 2 1 4 3; do \
 	    if ! grep -q -- "  $$want  ($$i so far)" $(BUILD)/teach.log; then \
 	        echo "make teach: FAILED -- line $$i did not answer $$want"; \
 	        failed=1; \
@@ -193,7 +199,7 @@ teach: $(KERNEL) $(HOON)
 	if [ $$failed -ne 0 ]; then \
 	    sed -n '/guest book/,$$p' $(BUILD)/teach.log; exit 1; \
 	fi; \
-	echo "make teach: four expressions compiled, typed, read, run, and answered"
+	echo "make teach: five expressions compiled, typed, read, run, and answered"
 
 # Both suites.  The machine's own first, because it is the thing everything else
 # is a claim about.

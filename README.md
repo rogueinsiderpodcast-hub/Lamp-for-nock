@@ -98,22 +98,27 @@ of steps says so and leaves the session exactly as it was.
 
 ```
 $ make build/hoon
-$ ./build/hoon '=+(/14 ~(/2 1 2))'
+$ ./build/hoon '=>(/14 ?:(/2 1 2))'
 [8 [[0 [14 0]] [[6 [[0 [2 0]] [[1 [1 0]] [[1 [2 0]] 0]]]] 0]]]
+$ ./build/hoon '=+(arm |(0 3) ?:(=(/4 /10) /10 ~(arm |(|(+(/4) /10) arm))))'
+[9 [6 ... a core, and the machine walks the loop at run time ...]]
 $ ./build/hoon '+(2 3)'
 [1 [5 0]]
 $ ./build/hoon '+(/14 1)'
 hoon: addition of two values that are only known at run time has no Nock definition in this machine yet: the twenty native operations are a tested bank and not proven jets, and writing this rune as a native call would make the compiler answer questions the machine has never been asked.  +(2 3) works, because the host can fold that.
 ```
 
-Ten forms: an atom, `/axis`, `?(a)`, `=(a b)`, `~(c t e)`, `*(a b)`, `|(a b)`,
-`+(a)`, `+(a b)` for two literals only, and `=+(a body)`. An address is checked
+Ten forms: an atom, `/axis`, `?(a)`, `=(a b)`, `~(arm core)`, `*(a b)`,
+`|(a b)`, `+(a)`, `+(a b)` for two literals only, plus `=>` (push), `?:`
+(conditional), and `=+` (core). `=+(arm sample body)` builds `[sample arm 0]`,
+so a name in a body is a read of `/6` and the sample's things are `/4`, `/10`,
+`/22`; that is enough to write a loop, and `make teach` runs one. An address is checked
 against the subject the expression will be run on, so an address that is not
 there is refused by name rather than compiled — a wrong address on this machine
 usually names a real noun instead of crashing, and the whole point of the
 language is that it is loud about that. `docs/decisions.md` item 22 has the
-table and the reasons, and `docs/state.md` has the three things the compiler
-got wrong first.
+table and the reasons, item 24 has the core and what it costs to loop, and
+`docs/state.md` has the three things the compiler got wrong first.
 
 ## Layout
 
