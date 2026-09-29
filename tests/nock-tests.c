@@ -50,6 +50,25 @@ static u64 fingerprint(noun n, u64 acc)
     return fingerprint(noun_tail(n), acc);
 }
 
+/* --- crashes ------------------------------------------------------------- */
+
+/* strstr is libc, and there is no libc here.  A crash reason is worth
+ * asserting on by name as well as by code: NOCK_STEPS_OUT is returned for both
+ * the step limit and the call depth limit, so the code alone cannot say which
+ * one stopped the machine. */
+static int has_text(const char *hay, const char *needle)
+{
+    if (hay == NULL || needle == NULL)
+        return 0;
+    for (const char *h = hay; *h; h++) {
+        const char *a = h, *b = needle;
+        while (*a && *b && *a == *b) { a++; b++; }
+        if (*b == 0)
+            return 1;
+    }
+    return 0;
+}
+
 static void test_nouns(void)
 {
     group("nouns");
@@ -91,6 +110,41 @@ static void test_nouns(void)
     check(noun_equal(deep, d3(A(11), A(22), A(33))), "edit leaves the original alone");
     check(noun_equal(noun_edit(deep, 6, A(99)), d3(A(11), A(99), A(33))), "edit at a deeper address");
     check(noun_equal(noun_edit(deep, 1, A(7)), A(7)), "edit at address 1 replaces the whole noun");
+
+    /* Structural equality is C recursion, and it used to have no limit at all.
+     * A formula can build a noun deeper than the guest's stack holds frames --
+     * a loop conses without recursing, and the arena has millions of cells --
+     * and then compare it against a second deep noun, and noun_equal walked
+     * off the end of the stack and triple faulted with nothing on the wire.
+     * The nouns have to be left-nested so the deep part is in the head: a
+     * right-nested list has an atom head, and the walk stops at level one.
+     * decisions.md item 32. */
+    {
+        u64 deep_n = NOCK_MAX_DEPTH + 1000;
+        noun tower1 = A(7), tower2 = A(7);
+        for (u64 i = 0; i < deep_n; i++) {
+            tower1 = C(tower1, A(7));
+            tower2 = C(tower2, A(7));
+        }
+        machine_reset_error();
+        noun_equal(tower1, tower2);
+        check(machine_err, "comparing two nouns deeper than the call depth stops");
+        check(has_text(nock_crash_reason(), "comparing two nouns"),
+              "and says so by name rather than overrunning the stack");
+        machine_reset_error();
+
+        /* Below the limit it is ordinary: a deep pair that really is equal
+         * still answers 0 (the same noun), so the guard is a limit and not a
+         * change of mind. */
+        noun ok1 = A(7), ok2 = A(7);
+        for (u64 i = 0; i < 100; i++) {
+            ok1 = C(ok1, A(7));
+            ok2 = C(ok2, A(7));
+        }
+        machine_reset_error();
+        check(noun_equal(ok1, ok2) == 1, "a deep pair inside the limit is still equal");
+        check(!machine_err, "and the walk inside the limit does not crash");
+    }
 }
 
 /* --- opcodes ----------------------------------------------------------- */
@@ -323,6 +377,33 @@ static void test_crashes(void)
                 NOCK_STEPS_OUT, runaway, runaway);
     nock_init(NOCK_DEFAULT_STEP_LIMIT);
     nock_jet_hooks(1);
+
+    /* The same runaway at the machine's *default* step limit, where the step
+     * limit is nowhere near being reached and the call depth is the only thing
+     * that can stop it.  This is the test that says NOCK_MAX_DEPTH is a limit
+     * the machine keeps rather than one it prints.  It used to be missing, and
+     * that is why the limit was 10000 for six steps: the only runaway test ran
+     * at a 5000-step budget, which fires the step limit before the depth limit
+     * can, so the depth guard was never reached by any test.  On the guest,
+     * whose stack holds 9362 levels and not 10000, the runaway then ran off the
+     * end of the stack and triple faulted with nothing on the wire.
+     * decisions.md item 30, and item 32 for the same wall in noun_equal. */
+    expect_code("a runaway at the default step limit hits the call depth limit",
+                NOCK_STEPS_OUT, runaway, runaway);
+
+    /* The reason has to be read before anything resets the machine, so this one
+     * runs the runaway by hand rather than through expect_code.  NOCK_STEPS_OUT
+     * is returned for both the step limit and the call depth limit, so the code
+     * alone cannot say which one stopped it -- and which one stops it is the
+     * whole claim: at the default step limit only the depth can. */
+    {
+        noun out = 0;
+        int rc = nock_run(runaway, runaway, &out);
+        check(rc == NOCK_STEPS_OUT, "a runaway at the default step limit is a steps-out");
+        check(has_text(nock_crash_reason(), "call depth"),
+              "and the reason it gives is the call depth, not the step limit");
+        machine_reset_error();
+    }
 
     /* The important half: the machine is still here. */
     expect_atom("the machine still works after a runaway formula", s, f1(1, A(4242)), 4242);

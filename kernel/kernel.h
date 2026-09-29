@@ -92,7 +92,15 @@ void  noun_print(noun n);
 #define NOCK_STEPS_OUT 2
 
 #define NOCK_DEFAULT_STEP_LIMIT 10000000ULL
-#define NOCK_MAX_DEPTH          10000u
+/* The interpreter is recursive in C, one frame per call, and nock() costs 104
+ * bytes of stack plus 8 for the return address.  The guest's stack is 1 MiB, so
+ * it holds 1048576 / 112 = 9362 levels, and the host's 8 MiB stack holds
+ * 74898.  This limit is the smaller of the two, because it has to be true on
+ * the machine with the small stack.  It was 10000, which the guest's stack could
+ * not back: a formula past 9362 overran the stack and triple faulted with
+ * nothing on the wire, and the `call depth exceeded` guard could not be reached
+ * because the stack died 638 frames before it.  decisions.md item 30. */
+#define NOCK_MAX_DEPTH          7000u
 
 void        nock_init(u64 step_limit);
 int         nock_run(noun subject, noun formula, noun *out);

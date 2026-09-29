@@ -259,7 +259,7 @@ by name when it lies -- a `+mul` record claiming a sum domain is "claims a domai
 the machine does not certify", and a definition that says `+mul(0, 0) = 3` is
 caught by the battery. `make check` is green end to end.
 
-**Green.** `make test` gives 262 checks, 0 failing, `LAMP: LIT`, and a checklist
+**Green.** `make test` gives 269 checks, 0 failing, `LAMP: LIT`, and a checklist
 of 13 -- 11 of Step 1's own, plus the one Step 4 added and the one Steps 5, 6
 and 7 share. The machine boots into
 long mode, reads a heap out of the PVH memory map, and runs the noun, Nock and
@@ -398,7 +398,7 @@ could be read:
 
 ## Where Step 2 stands
 
-**Done.** The self-test is 262 checks, 0 failing, `LAMP: LIT`, checklist 13 of 13
+**Done.** The self-test is 269 checks, 0 failing, `LAMP: LIT`, checklist 13 of 13
 -- the eleventh having been the one that pulled this step out of the red, that a
 formula typed at the machine runs and what it leaves behind matters. The rules
 check, item 13, is Step 5's own.  It was checked by breaking the count increment
@@ -724,6 +724,53 @@ later reader ends up arguing with a decision that was already made.
    coming back over the serial line. Two-way, where the guest can call out to the
    host, is a real problem but it belongs to running a real `vere`, which is a
    much later thing than this.
+
+## The audit, and the three bugs it found
+
+Asked to go back over Nock and check that the machine does what the rules say
+rather than what a reader would guess, having finished every planned step. The
+semantics held up: all twelve opcodes, the axis rules, the noun representation,
+persistent edit, and all twenty primitives match Nock 4K, and the jets are
+observational — a dynamic hint changes which path runs, never the answer. The
+soundness arguments were sound.
+
+What did not hold up was the machine's own limits, and all three bugs have the
+same shape, which is the reason they are worth writing down as one thing rather
+than three: **each was a claim the source made and the machine did not keep.**
+
+1. **`NOCK_MAX_DEPTH` was 10,000, and the guest's stack cannot hold 10,000
+   frames.** 1 MiB of stack, 112 bytes a frame, so about 9,362. A runaway at the
+   default step budget triple faulted and said nothing. Fixed to 7,000
+   (`decisions.md` item 30), which leaves 264,576 bytes of stack and the whole
+   8,316,544-cell arena intact — the limit is worth exactly what the
+   `+add`/`+mul` batteries cost, and those cost 3,352,981.
+2. **`make` did not know what a source file includes.** Editing `kernel.h`
+   rebuilt nothing, so `kernel.h` said 7,000 and the image carried 9,999, and
+   the tests were green against a binary that did not contain the fix. Found
+   while fixing 1, and the reason 1's regression had to be re-verified from a
+   `make clean` to believe at all. Fixed with `-MMD -MP` and the generated
+   `.d` includes (item 31).
+3. **`noun_equal` was unbounded C recursion.** A loop conses without recursing,
+   so a formula could build a noun deeper than the stack has frames, hand it to
+   opcode 5, and triple fault the interpreter itself — no crash code, no reason,
+   because the thing that died was the thing that reports errors. Fixed with a
+   depth argument and the same `NOCK_MAX_DEPTH`, so a comparison cannot recurse
+   deeper than the evaluation that built it (item 32).
+
+Each has a regression that fails without the fix, and each was checked by
+removing the fix: the step test dies at 10,000, the noun test dies without the
+guard, and an edited header now rebuilds its users. That last one matters most,
+because a build that can quietly disagree with its source makes every other check
+in this file a check of last week's kernel.
+
+The shared lesson is the one item 24's loop already taught, in a sharper form.
+The host has an 8 MiB stack where the guest has 1 MiB and compiles the same
+interpreter, so a limit that is safe on the desk is not safe on the machine, and
+nothing in the suite ever asked the guest. Both bugs 1 and 3 were invisible to
+the host by construction. A test that cannot fail is a decoration, and the first
+probe for bug 3 was one: a right-nested list compares equal at level one at any
+depth whatsoever, so the buggy machine reported 100,000 as perfectly fine and the
+probe "confirmed" safety. It has to be left-nested to be a test at all.
 
 ## The kill list, still in force
 

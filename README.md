@@ -25,15 +25,15 @@ No operating system, no libc, no bootloader, no disk, no network. The only piece
 of hardware it touches is the 16550 serial port at 0x3f8, polled, one byte at a
 time.
 
-The whole machine is 3,043 lines, counting non-blank lines with `/* */` and
-`//` comments stripped: 133 of assembly to reach long mode, 1,922 of C, 852 of
+The whole machine is 3,097 lines, counting non-blank lines with `/* */` and
+`//` comments stripped: 133 of assembly to reach long mode, 1,932 of C, 896 of
 tests, and 136 of headers. `make lines` runs the count, so the figure is a
 command and not a claim. (Stated that way because the previous figure, 1,991,
 could not be reproduced by any counting method and was therefore not worth
 carrying, and because a number nobody can re-derive is a number nobody should
 trust: the method is `tools/lines.awk`, and it is awk because a `/*` comment can
 open on one line and close on another, which any per-line filter gets wrong.
-The 852 of tests are 262 checks over the noun layer, the interpreter, the
+The 896 of tests are 269 checks over the noun layer, the interpreter, the
 primitives, the reader and the book; the rules claim is not in them, because the
 2080-pair `+add` battery and the 892-pair `+mul` one fit the machine's arena and
 not the host's, so they are made
@@ -201,7 +201,7 @@ boot/link.ld       one load segment at 0x100000
 kernel/kernel.h    the only header
 kernel/serial.c    polled 16550 UART
 kernel/memory.c    PVH memory map, bump allocator
-kernel/noun.c      nouns, slot, edit, structural equality
+kernel/noun.c      nouns, slot, edit, structural equality (depth-bounded)
 kernel/nock.c      the interpreter
 kernel/primitives.c  the twenty native primitives
 kernel/book.c      the guest book's one formula, and the session it builds
@@ -227,6 +227,13 @@ This matters more than the feature list, so it is stated plainly.
 - the 64-bit handover, the serial line, and the memory map
 - the noun representation: 63-bit atoms, structural equality, tree addressing,
   persistent edit
+- that the machine's C recursion is bounded before it reaches the stack: a
+  runaway at the default step budget stops with `call depth exceeded` and the
+  reason named, and comparing two nouns deeper than the call limit does the same
+  rather than triple faulting (items 30 and 32)
+- that `make` knows what a source file includes: the image that boots is rebuilt
+  from an edited header, so a green run is a run against the source as it stands
+  (item 31)
 - all twelve Nock opcodes, each against a value derived by hand from the rules,
   written out beside the test
 - the pairs that are easy to get backwards: opcode 2 against opcode 7, literal

@@ -100,7 +100,18 @@ noun noun_tail(noun n)
     return arena[n >> 1].tail;
 }
 
-int noun_equal(noun a, noun b)
+/* Structural equality, and the recursion it does is C recursion like any other.
+ *
+ * noun_equal walks two nouns in step, so a pair that agrees everywhere except
+ * deep down sends it as deep as the nouns are deep.  A formula can build a
+ * noun far deeper than the guest's stack holds frames -- the arena has millions
+ * of cells and a loop conses them without recursing -- and then compare it, and
+ * this used to walk straight off the end of the stack and triple fault with
+ * nothing on the wire.  It is bounded by the same NOCK_MAX_DEPTH the
+ * interpreter is, because it is the same kind of recursion on the same stack:
+ * a comparison may not recurse deeper than the evaluation that built the noun.
+ * decisions.md item 32. */
+static int noun_equal_at(noun a, noun b, u64 depth)
 {
     /* Identical words are identical nouns.  This also makes shared structure
      * cheap, which matters because the interpreter shares a lot. */
@@ -111,15 +122,27 @@ int noun_equal(noun a, noun b)
     if (noun_is_atom(a))
         return noun_atom_val(a) == noun_atom_val(b);
 
+    if (depth >= NOCK_MAX_DEPTH) {
+        machine_crash("call depth exceeded comparing two nouns");
+        return 0;
+    }
+
     /* Different cells, so compare structurally.  Two structurally equal
      * nouns can have different arena indices; that is expected and it is why
      * this is not a pointer comparison. */
     noun ah = noun_head(a), bh = noun_head(b);
     if (machine_err)
         return 0;
-    if (!noun_equal(ah, bh))
+    if (!noun_equal_at(ah, bh, depth + 1))
         return 0;
-    return noun_equal(noun_tail(a), noun_tail(b));
+    if (machine_err)
+        return 0;
+    return noun_equal_at(noun_tail(a), noun_tail(b), depth + 1);
+}
+
+int noun_equal(noun a, noun b)
+{
+    return noun_equal_at(a, b, 0);
 }
 
 /* A tree address is a path from the root written as a binary number: the

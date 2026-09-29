@@ -189,7 +189,7 @@ proofs: $(PROOFS)
 # with the limit it was given.  The
 # loop is one line of source no matter how far it counts, and the machine walks
 # it at run time; on the host the same formula costs 17 steps and 7 nouns per
-# call, and a thousand calls fit inside the 10000-frame depth limit while ten
+# call, and a thousand calls fit inside the 7000-frame depth limit while seven
 # thousand do not.  See decisions.md item 24.  A line whose answer came out one
 # out is the failure this is here to catch: the compiler and the machine agreeing
 # about a number is the only thing that makes the numbers mean anything.
@@ -504,11 +504,11 @@ debug: $(KERNEL)
 
 $(BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
 
 $(BUILD)/host/%.o: %.c
 	@mkdir -p $(dir $@)
-	$(CC) $(HOSTCFLAGS) -c $< -o $@
+	$(CC) $(HOSTCFLAGS) -MMD -MP -c $< -o $@
 
 $(HOON): $(HOON_OBJS)
 	$(CC) $(HOSTCFLAGS) -o $@ $(HOON_OBJS)
@@ -526,3 +526,10 @@ $(KERNEL): $(OBJS) boot/link.ld
 
 clean:
 	rm -rf $(BUILD)
+
+# The .d files the -MMD -MP rules above write.  Without these, editing a header
+# does not rebuild the objects that include it, and make links the old ones
+# silently: the binary is then not the source, and a test that passes is a test
+# of last week's kernel.  That is how NOCK_MAX_DEPTH stayed 10000 in the
+# compiled image after kernel.h said 7000.  decisions.md item 31.
+-include $(OBJS:.o=.d) $(HOON_OBJS:.o=.d) $(PROOFS_OBJS:.o=.d)

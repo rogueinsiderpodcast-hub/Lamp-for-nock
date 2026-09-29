@@ -908,6 +908,14 @@ keeps the formula the same size as the count grows:
 | 1001 (limit 1000) | 17015 | 7096 | 370 |
 | 10001 (limit 10000) | 84968 | 35075 | 370, then `call depth exceeded` |
 
+The last row is a host measurement and it is above the limit the machine now
+enforces: `NOCK_MAX_DEPTH` is 7000, because 10000 is more frames than the
+guest's 1 MiB stack holds and the whole table was measured where the stack is
+8 MiB. The guest stops at 7000 and says `call depth exceeded`; the host still
+stops at 10000. The row is left as it was run rather than restated for a limit
+nobody re-measured, and item 30 has the whole of it. Nothing in it is wrong;
+it is a number about the host, labelled as one.
+
 Every one of those steps is `15 + 17n` and every one of those nouns is
 `92 + 7n`, for a limit of `n` and a session of one entry, both exact: limits 0,
 1, 2, 3, 4, 5, 6, 10, 100 and 1000 were run and every one landed on the
@@ -918,8 +926,8 @@ without running it.
 
 So 17 steps and 7 nouns per call -- 7.0 from the two long runs, 792 cells at 100
 calls and 7092 at 1000 -- and the formula constant. What ends a long loop is
-`NOCK_MAX_DEPTH` (10000), the interpreter's own C recursion at one frame per
-call, and not memory: the host arena is half of a 4 MiB heap, 131072 cells, so a
+`NOCK_MAX_DEPTH`, the interpreter's own C recursion at one frame per call, and
+not memory: the host arena is half of a 4 MiB heap, 131072 cells, so a
 10000-call loop is 70000 cells and memory would bind at about 18700 calls. It is
 the same wall the `+add` definition in item 23 hit at 3000 turns. The reader is
 nowhere near it either: the loop is 370 characters of the 4096 a line may be,
@@ -1073,7 +1081,7 @@ tools measured it. The definition's cost is exactly linear: one case of
 cells, so it is always honest about what it will cost. But the loop cannot sum
 everything: it stops, with `call depth exceeded`, somewhere past `a + b ≈ 3300`
 (bisect: 3200 runs, 3400 stops), because every turn spends a slice of the
-10000-frame call depth. A definition that stops somewhere cannot be a
+7000-frame call depth. A definition that stops somewhere cannot be a
 definition of everything. The honest shape of the claim is therefore bounded: **the
 machine's `+add` is a definition on the triangle `a + b < 64`, and the C native
 outside it.** The bound is a fact about the machine, not a decoration: 64 was
@@ -1328,3 +1336,130 @@ is that a write past the old 64 MiB boundary now lands. The two limits are
 still two limits: the arena holds 8,316,544 cells because the heap is 254 MiB,
 and the identity map covers the heap because that is the contract the bump
 allocator already had with it.
+
+## 30. The call depth limit is a promise the stack has to keep, and it did not
+
+`NOCK_MAX_DEPTH` is 7000, and it is 7000 because the guest's stack holds
+9362 levels of `nock()` and not 10000. It was 10000 until this item, and on the
+guest it was a lie in the same way item 29's identity map was: a limit the
+machine printed and enforced nowhere.
+
+The interpreter is recursive in C, one frame per call, and each frame is 104
+bytes of stack plus 8 for the return address. The guest's stack is 1 MiB
+(`boot/boot.S`), so it holds `1048576 / 112 = 9362` levels. The host that runs
+`make hoontest` and `make proofs` has an 8 MiB stack and holds 74898. The same
+`kernel/nock.c` compiles for both, so one `NOCK_MAX_DEPTH` was asked to mean
+10000 on the machine with 8 MiB and on the machine with 1 MiB, and it only ever
+meant anything on the first. Every number in item 24's loop table -- the row
+`10001 (limit 10000) ... then call depth exceeded` -- was measured on the host,
+which is why the guest was never asked.
+
+So a formula that recursed past 9362 on the guest wrote past the end of the
+stack, took a page fault at an address the IDT had no entry for, and triple
+faulted. The whole guest went away mid-evaluation with nothing on the wire --
+the same silence as item 29 -- and the depth guard's `call depth exceeded` was
+never printed, because the guard could not be reached: the stack died 638
+frames before `call_depth` got to 10000.
+
+The self-test missed it for a reason worth naming. `test_crashes` runs the
+runaway formula `[2 [0 1] [0 1]]` after `nock_init(5000)`. 5000 steps is below
+the depth the runaway reaches in 5000 steps, so the step limit fired first and
+the depth limit was never exercised. The one test that should have caught this
+was pinned to a budget that hid it. At the machine's real step limit
+(10,000,000) the same runaway reaches depth 10000 -- past 9362 -- and the guest
+dies with no diagnostic, which is the whole bug in one line.
+
+The fix is to make the limit the smaller honest number, not to grow the stack.
+Growing the stack by 1 MiB would grow `.bss`, which pushes `kernel_end_phys`
+up, which takes a megabyte off the PVH heap and changes `noun_capacity` from
+the 8,316,544 that item 29 just made true. Trading a documented arena for a
+documented depth is not worth it; 7000 is. 7000 levels is 784,000 bytes, 75% of
+the stack, leaving 264,576 bytes -- 258 KiB -- of headroom for the frame to grow
+and for the one
+extra frame a jet probe's nested `nock_apply` costs on the way past. It is
+above every legitimate depth the machine has: item 23's `+add` definition runs
+out of depth at about 3000 calls, and the loop in item 24 is written against a
+1000-call limit.
+
+The check that came out of it is the shape item 29 ended with. The runaway
+formula now runs at the machine's *default* step limit, where the depth guard is
+the thing that stops it, and the test asserts the machine reports
+`call depth exceeded` and still answers the next line. A limit that only holds
+because a test lowered the budget below it is not a limit.
+
+## 31. make has to know what a source file includes, or the binary is not the source
+
+The compile rules carried no header dependencies. `$(BUILD)/%.o: %.c` said an
+object depends on the `.c` it came from and on nothing else, so editing a header
+rebuilt nothing, and `make` linked the old objects in without a word. Every
+`kernel/*.c` includes `kernel/kernel.h`, and every object is a product of that
+header as much as of its own source.
+
+This is not a tidiness point; it is the same failure as item 29 and item 30, one
+level further out. Both of those are the machine claiming a limit it does not
+keep. This one is `make` claiming a dependency graph it does not have, so the
+image that boots is not the image that was written, and every check that runs
+against it is a check of last week's kernel. It was found while fixing item 30:
+`kernel.h` said `NOCK_MAX_DEPTH 7000` and the compiled image still carried
+`cmp $0x270f`, which is 9999. The change had been made, the tests had been
+re-run, and the tests were green against a binary that did not contain them --
+which is exactly how item 30's regression test appeared to pass at first, and
+why the depth fix had to be re-verified from a `make clean` to believe.
+
+The fix is `-MMD -MP` on both the kernel and the host rules and an `-include` of
+the generated `.d` files, which is the ordinary answer and costs one line. What
+is worth recording is the rule behind it: a build that can quietly disagree with
+its source is a test suite that tests the wrong machine, and for a project whose
+whole claim is that the machine is checked, that is the one failure that makes
+every other check worthless. If a limit in this machine is going to be believed,
+the thing that was compiled has to be the thing that was read.
+
+Both regressions now fail loudly without their fix: put `NOCK_MAX_DEPTH` back to
+10000 and the runaway test triple faults the guest mid-test; drop the
+`noun_equal` depth guard and its test does the same. A check that cannot fail is
+not a check, and these two were only ever able to fail after this item made the
+binary honest about what it contains.
+
+## 32. structural equality is C recursion too, and it had no limit at all
+
+Item 30 lowered `NOCK_MAX_DEPTH` so the interpreter cannot run off the guest's
+stack. That fixed the interpreter and left the noun layer exactly as unsafe, and
+the reason it did not show up in the suite is the reason item 24's loop did not
+show up either: nothing in the tests ever built a noun deep enough to notice.
+
+A formula can cons a noun deeper than the stack has frames without ever
+recursing, because a loop is a loop -- `~` walks the subject and builds a cell
+per turn, and each turn costs one interpreter frame, not one per cell. So a
+nock core can build a hundred-thousand-deep noun in an arena of 8,316,544 cells
+and then hand it to opcode 5. `noun_equal` is ordinary C recursion over the
+structure, one frame per level, with no depth argument and no limit, so it ran
+straight off the end of the stack and triple faulted. The machine said nothing
+at all: no crash code, no reason, the same silence as item 30, because a
+triple fault is not an error the interpreter can report -- the interpreter is
+what died.
+
+The first probe for this proved nothing, and it is worth recording why. A
+right-nested list `[[[[7] 7] 7] 7]` has an atom head at every level but the
+first, so equality compares two atoms, agrees, and returns at level one, at any
+depth at all. Both probes reported 100,000 as fine. The structure has to be
+left-nested -- `[D 7]`, where the deep part is in the *head* -- for the walk to
+have somewhere to go, and only then did it stop, somewhere between 9,362 and
+20,000, which is the same 1 MiB stack and the same ~112 bytes a frame that item
+30 measured. A regression that cannot fail is a decoration, and this one was
+nearly written as one: it passed against a machine with the bug, and would have
+been recorded as evidence the noun layer was sound.
+
+The fix is a depth argument and the same `NOCK_MAX_DEPTH` the interpreter uses,
+because it is the same kind of recursion on the same stack, with the same 784,000
+bytes of headroom behind it. Same limit for both is not a coincidence to be
+tidied up later: a noun comparison that could recurse deeper than the
+interpreter that built the noun would mean the machine could be killed by data it
+had already accepted. `machine_crash("call depth exceeded comparing two nouns")`
+says which of the two bounds it was, because `NOCK_STEPS_OUT` alone cannot --
+`NOCK_STEPS_OUT` is returned for both the step limit and the depth limit, and
+that ambiguity is why `tests/nock-tests.c` grew a `has_text` to assert on the
+reason by name. The test builds two independent towers of `NOCK_MAX_DEPTH +
+1000`, checks that the walk stops and names itself, and then checks that a
+100-deep pair still compares equal -- the guard is a limit, not a change of mind.
+Removing the guard triple faults the guest mid-test, which is the only proof
+that matters.
