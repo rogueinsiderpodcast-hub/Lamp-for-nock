@@ -697,6 +697,49 @@ static void gb_rule(void)
         serial_put_nl();
         return;
     }
+
+    /* The atom 0 is the empty definition: it is not a formula, so there was
+     * never a rule that 0 could be, and the row a primitive is born with is
+     * definition 0 over limit 0.  `! 0 0` therefore puts the rule away --
+     * the machine writes the row back to the state it booted into.  The
+     * record's answer half is 0 too, because a removal claims nothing, and
+     * the record is the same claim: answer shape as everything else. */
+    if (noun_is_atom(def) && noun_atom_val(def) == 0) {
+        if (colon != NULL) {
+            noun claimed = 0;
+            if (gb_parse(colon + 1, gb_line_len - (u64)(colon + 1 - gb_line),
+                         &claimed, &why) != GB_PARSE_OK) {
+                serial_puts("  no.  the record's domain is not a noun the reader takes: ");
+                serial_puts(why);
+                serial_put_nl();
+                return;
+            }
+            if (!noun_is_atom(claimed) || noun_atom_val(claimed) != 0) {
+                serial_puts("  no.  to remove a rule, the record is ! ");
+                serial_put_dec(index);
+                serial_puts(" 0: 0 --\n");
+                serial_puts("  nothing claimed nothing certified.\n");
+                return;
+            }
+        }
+        if (!prim_rule_state((int)index, NULL)) {
+            serial_puts("  no.  there is no rule for ");
+            serial_puts(prim_get((int)index)->name);
+            serial_puts(" to remove.\n");
+            return;
+        }
+        prim_rule_set((int)index, 0);
+        serial_puts("  yes.  ");
+        serial_puts(prim_get((int)index)->name);
+        serial_puts(" is no longer a rule; the C native answers\n");
+        serial_puts("  everywhere again.\n");
+        if (colon == NULL) {
+            serial_puts("! ");
+            serial_put_dec(index);
+            serial_puts(" 0: 0\n");
+        }
+        return;
+    }
     if (noun_is_atom(def)) {
         serial_puts("  no.  a definition has to be a formula, which is a cell,\n");
         serial_puts("  and an atom is nothing to run.\n");
@@ -829,6 +872,23 @@ int gb_rules_ok(void)
             all = 0;                          /* outside the domain: the native */
         if (prim_native_runs(0) != nt0 + 1)
             all = 0;
+
+        /* Removal (item 27): the empty definition takes the rule back down to
+         * the row it was born with, and a probe inside the former domain must
+         * then be answered by the native -- the counters are the proof, since
+         * a removed rule cannot tell the two paths apart by value. */
+        prim_rule_set(0, 0);
+        if (prim_rule_state(0, NULL))
+            all = 0;
+        u64 rt1 = prim_rule_runs(0);
+        u64 nt1 = prim_native_runs(0);
+        machine_reset_error();
+        res = 0;
+        if (prim_rule_probe(0, 3, 4, &res) != 0 || res != 7)
+            all = 0;
+        if (prim_rule_runs(0) != rt1 || prim_native_runs(0) != nt1 + 1)
+            all = 0;
+        prim_rule_set(0, d);                  /* and put it back, as a boot lands */
     }
     machine_reset_error();
     return all;
@@ -995,7 +1055,9 @@ void gb_run(void)
     serial_puts("  a line that starts with ! is a rule: a formula that claims to\n");
     serial_puts("  be a primitive, checked exhaustively over the domain the machine\n");
     serial_puts("  certifies before it may be used.  ! 0 <definition> claims\n");
-    serial_puts("  +add, and ! <index> says what that primitive is right now.\n");
+    serial_puts("  +add, ! <index> says what that primitive is right now, and\n");
+    serial_puts("  ! <index> 0 puts its rule away.  the record of either is ! <i>\n");
+    serial_puts("  <thing>: the domain it was checked over, or 0 for a removal.\n");
     serial_put_nl();
     serial_puts("  > ");
 

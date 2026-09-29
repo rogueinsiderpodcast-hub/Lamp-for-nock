@@ -1165,3 +1165,60 @@ battery, determinism is preserved by construction, and the one re-entrant hazard
 sees and the fallback then accounts for. The arena and the step limit bound even
 the attempts, and a refused rule leaves the machine exactly as it found it,
 never half-applied.
+
+## 27. A rule can be put away, and the putting away is a record
+
+**Decided:** Step 6 gives removal. The line `! 0 0` -- the primitive's index,
+then the atom 0 -- puts the rule for `+add` away, and the primitive goes back
+to its C native on every input. The atom 0 is the empty definition: 0 is not a
+cell, so 0 was never a rule that could exist, and the rule row a primitive is
+born with is exactly the zero row, definition 0 over limit 0. Removal is
+therefore not a new operation with new kinds of record; it is the machine
+writing the row back to the state it booted into, the same row a battery once
+filled. The report that follows says what is true now: for `+add`, "the C
+native answers", exactly the phrase item 26's report reserved for the
+unruled case.
+
+**Removal needs no battery.** An install claims a definition over a domain and
+must be checked in full; a removal claims nothing -- zero definitions over a
+zero domain (the record's answer half is 0, the way an install's answer half
+is the certified limit). There is nothing new to prove and nothing to verify:
+the definition is discarded rather than replaced, and a discarded definition
+was already checked before it was ever allowed to answer. The counters are
+kept as they are, because a counter is a record of what answered, not a
+promise about what will; they read the same after a removal, and the next
+native probe simply grows the native count again.
+
+**Removal is a record, in the same `claim: answer` shape as everything else
+the notebook holds.** Typed by hand, `! 0 0` is echoed as
+
+```
+! 0 0: 0
+```
+
+and a notebook that already holds the install writes this line after it. Replay
+is ordered, the way Step 4's doctrine already made it: the checklist installs
+the certified `+add` at boot, then the notebook's records replay in order, and
+the last word on any primitive wins. A notebook whose records end with an
+install leaves the rule in; one that ends with a removal leaves it away; the
+restore is the notebook's last word, exactly as it is for a session line. This
+is why the boot checklist's own install cannot fight a removal -- it always
+runs before the restore, never after -- and it is also why a removal record
+replayed is never refused for having nothing to remove: the checklist's install
+has just put the rule there, and the record's whole job is to take it back
+down. A typed `! 0 0` when no rule is installed (the rule was removed moments
+ago, or the primitive never had one) is refused by name: "there is no rule for
++add to remove", because claiming to remove a rule that is not there is the one
+removal a notebook cannot back up.
+
+**The grammar stays unambiguous.** `! 0 0` was already legal text that the
+machine refused, as a definition that is an atom rather than a formula; Step 6
+reclassifies exactly the single atom 0 on the line after an index from "refused,
+not a formula" to "removed". Every other atom is still refused as before, every
+cell definition is still checked in full, `! 0 0: 64` is refused (a removal
+claims nothing, so it claims the record's answer half, and the record's answer
+half for a removal must be 0 -- a rule of nothing claiming a domain is the same
+lie as an install claiming one it was not checked over). The checklist proves
+the new direction on every boot: remove, probe inside the former domain, and
+the probe must be answered by the native, then install again so a fresh boot
+lands where it always did.

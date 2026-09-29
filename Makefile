@@ -328,17 +328,22 @@ notebook-test: $(KERNEL)
 check: test hoontest proofs notebook-test rules-test
 	@echo "make check: the machine's suite, the compiler's, the jet proofs and the notebook all passed"
 
-# --- the rules (Step 5) -----------------------------------------------------
+# --- the rules (Step 5) and their removal (Step 6) --------------------------
 #
-# The whole of item 26 on the wire: type a rule, watch it be checked in full,
-# watch a jet be answered by it within the domain and by the C native outside
-# it, and watch the record come back on a later boot and be re-verified rather
-# than re-admitted.  The same definition is compiled into the machine's own
-# checklist (gb_rules_ok); if the copy below drifts from it, the battery refuses
-# or the echo disagrees and this test says so.
+# The whole of items 26 and 27 on the wire: type a rule, watch it be checked in
+# full, watch a jet be answered by it within the domain and by the C native
+# outside it, put it away and watch the native answer everywhere again, and
+# watch the records come back on a later boot and be re-verified rather than
+# re-admitted -- the notebook's last word on a primitive wins.  The same
+# definition is compiled into the machine's own checklist (gb_rules_ok); if the
+# copy below drifts from it, the battery refuses or the echo disagrees and this
+# test says so.
 #
 # ADD_DEF is item 23's +add, decision 23 wrote it down and decision 26 is the
-# rule that is checked over a + b < 64.
+# rule that is checked over a + b < 64.  The counters are asserted as print, and
+# they are exact: the checklist itself now proves a removed rule stops answering
+# on every boot, which is one more native probe than Step 5's numbers had -- the
+# machine says so below, and this test is read against what the machine prints.
 ADD_DEF := [9 [126 [[10 [[126 [1 [[6 [[5 [[0 [62 0]] [[1 [0 0]] 0]]] [[6 [[5 [[0 [14 0]] [[0 [2 0]] 0]]] [[9 [126 [[10 [[126 [0 [126 0]]] [[10 [[62 [1 [1 0]]] [[10 [[30 [0 [30 0]]] [[10 [[14 [1 [0 0]]] [[10 [[6 [0 [6 0]]] [[10 [[2 [0 [2 0]]] [[1 [[0 [0 [0 [0 [0 [0 0]]]]]] 0]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] [[9 [126 [[10 [[126 [0 [126 0]]] [[10 [[62 [1 [0 0]]] [[10 [[30 [4 [[0 [30 0]] 0]]] [[10 [[14 [4 [[0 [14 0]] 0]]] [[10 [[6 [0 [6 0]]] [[10 [[2 [0 [2 0]]] [[1 [[0 [0 [0 [0 [0 [0 0]]]]]] 0]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]]] [[6 [[5 [[0 [14 0]] [[0 [6 0]] 0]]] [[0 [30 0]] [[9 [126 [[10 [[126 [0 [126 0]]] [[10 [[62 [1 [1 0]]] [[10 [[30 [4 [[0 [30 0]] 0]]] [[10 [[14 [4 [[0 [14 0]] 0]]] [[10 [[6 [0 [6 0]]] [[10 [[2 [0 [2 0]]] [[1 [[0 [0 [0 [0 [0 [0 0]]]]]] 0]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]]] 0]]]] 0]]] [[10 [[62 [1 [0 0]]] [[10 [[30 [1 [0 0]]] [[10 [[14 [1 [0 0]]] [[10 [[6 [0 [6 0]]] [[10 [[2 [0 [2 0]]] [[1 [[0 [0 [0 [0 [0 [0 0]]]]]] 0]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]]
 
 # The rule that lies about its domain, and the rule that lies about +add.  Both
@@ -349,7 +354,7 @@ RULES_J2 := $(BUILD)/rules2.log
 
 rules-test: $(KERNEL)
 	@rm -f $(RULES_J)
-	@{ printf '! 0 $(ADD_DEF)\n[11 [0 [1 [[9 5] 0]]] [0 2 0] 0]\n[11 [0 [1 [[1000 2000] 0]]] [0 2 0] 0]\n!\n\004'; } \
+	@{ printf '! 0 $(ADD_DEF)\n[11 [0 [1 [[9 5] 0]]] [0 2 0] 0]\n[11 [0 [1 [[1000 2000] 0]]] [0 2 0] 0]\n!\n! 0 0\n[11 [0 [1 [[9 5] 0]]] [0 2 0] 0]\n!\n\004'; } \
 	  | $(QEMU) -kernel $(KERNEL) \
 	  | tee >(sed -n 's/\r$$//; /^[%!] /p' >> $(RULES_J)) > $(BUILD)/rules1.log 2>&1; \
 	wait; \
@@ -369,12 +374,24 @@ rules-test: $(KERNEL)
 	    echo "make rules-test: FAILED -- +add(1000, 2000) was not answered outside the domain"; \
 	    sed -n '/== guest book/,$$p' $(BUILD)/rules1.log; exit 1; \
 	fi; \
-	if ! grep -q 'the rule has answered 3 probes, the native 5' $(BUILD)/rules1.log; then \
+	if ! grep -q 'the rule has answered 3 probes, the native 6' $(BUILD)/rules1.log; then \
 	    echo "make rules-test: FAILED -- the counters do not divide between the definition and the native"; \
 	    sed -n '/== guest book/,$$p' $(BUILD)/rules1.log; exit 1; \
 	fi; \
+	if ! grep -Fqx "! 0 0: 0" $(RULES_J); then \
+	    echo "make rules-test: FAILED -- the removal was not written down as a record"; \
+	    cat $(RULES_J); exit 1; \
+	fi; \
+	if ! grep -q 'is no longer a rule; the C native answers' $(BUILD)/rules1.log; then \
+	    echo "make rules-test: FAILED -- the rule was not put away"; \
+	    sed -n '/== guest book/,$$p' $(BUILD)/rules1.log; exit 1; \
+	fi; \
+	if ! grep -q 'domain a + b < 64\.  the C native answers' $(BUILD)/rules1.log; then \
+	    echo "make rules-test: FAILED -- the report does not say the native answers everywhere again"; \
+	    sed -n '/== guest book/,$$p' $(BUILD)/rules1.log; exit 1; \
+	fi; \
 	rm -f $(RULES_J2); \
-	printf '%s\n!\n[0 14 0]\n\004' "$$(cat $(RULES_J))" \
+	printf '%s\n!\n[0 14 0]\n! 0 0\n\004' "$$(cat $(RULES_J))" \
 	  | $(QEMU) -kernel $(KERNEL) \
 	  | tee >(sed -n 's/\r$$//; /^[%!] /p' >> $(RULES_J2)) > $(BUILD)/rules2.log 2>&1; \
 	wait; \
@@ -382,12 +399,16 @@ rules-test: $(KERNEL)
 	    echo "make rules-test: FAILED -- a rule record was not re-verified on the next boot"; \
 	    cat $(BUILD)/rules2.log; exit 1; \
 	fi; \
-	if ! grep -q 'the rule is installed' $(BUILD)/rules2.log; then \
-	    echo "make rules-test: FAILED -- the replayed rule is not installed"; \
+	if ! grep -q 'domain a + b < 64\.  the C native answers' $(BUILD)/rules2.log; then \
+	    echo "make rules-test: FAILED -- the replayed removal did not stay away (last word loses)"; \
 	    cat $(BUILD)/rules2.log; exit 1; \
 	fi; \
-	if ! grep -q '  2  (3 so far)' $(BUILD)/rules2.log; then \
+	if ! grep -q '  3  (4 so far)' $(BUILD)/rules2.log; then \
 	    echo "make rules-test: FAILED -- the rule lines were not written down as session history"; \
+	    sed -n '/== guest book/,$$p' $(BUILD)/rules2.log; exit 1; \
+	fi; \
+	if ! grep -q 'there is no rule for +add to remove' $(BUILD)/rules2.log; then \
+	    echo "make rules-test: FAILED -- a removal with nothing to remove was taken"; \
 	    sed -n '/== guest book/,$$p' $(BUILD)/rules2.log; exit 1; \
 	fi; \
 	printf '! 0 $(ADD_DEF): 65\n!\n\004' \
@@ -406,7 +427,7 @@ rules-test: $(KERNEL)
 	    echo "make rules-test: FAILED -- a definition that lies about +add was not refused by name"; \
 	    cat $(BUILD)/rules4.log; exit 1; \
 	fi; \
-	echo "make rules-test: a rule is text, checked in full, and re-verified out of the notebook"
+	echo "make rules-test: a rule is text, checked in full, re-verified out of the notebook, and put away by the same record shape"
 
 debug: $(KERNEL)
 	qemu-system-x86_64 -machine pc -m 256 -no-reboot \

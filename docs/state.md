@@ -17,6 +17,7 @@ of them still leaves something real.
 | **3. Teacher** | You write instructions in a real language, and they run. | 3, code is data | **green — a Hoon-shaped language with cores, names and a loop** |
 | **4. Notebook** | The guest book survives the power being turned off. | durability | **green — the log is written down as it runs, and replayed on the next boot** |
 | **5. New Rules** | The machine rewrites its own behaviour from text you send it, and cannot be broken by it. | 5, it cannot be lied to | **green — a rule is text, checked in full before it is allowed to be behaviour** |
+| **6. Rule removal** | An accepted rule can be put away, and the putting away is a record. | 6, the empty definition | **green — `! 0 0` puts the rule away, echoed as the record `! 0 0: 0`, and the notebook's last word wins** |
 | ~~Wire~~ | ~~Networking~~ | | deferred indefinitely |
 
 **Step 3 is the bridge.** The compiler stays on the host: you type into
@@ -105,16 +106,18 @@ its own workstation cannot: the attempt ran out of arena at `+add(2, 58)`, so
 
 **The counters are the proof that the split took.** Outside the domain the
 native answers, inside it the definition does, and the machine counts per
-primitive how many probes each path answered. The boot checklist runs one probe
-inside the domain and one outside it and asserts the split by the *deltas*: the
-counters are machine-lifetime, the self-test's own jets run before any rule
-exists, so `native_runs` starts at 2 and the assertion is `+1` on each side
-rather than an absolute number. `!` alone reports the split on demand; live, the
-rule answered 9 + 5 = 14 and the native 1000 + 2000 = 3000, and the report said
-"the rule has answered 3 probes, the native 5". The session evaluates a line's
-answer twice (once for the entry, once for the new session), which is
-idempotent, so a jetting line fires twice and gains two probes per line -- that
-is measured and said, not hidden.
+primitive how many probes each path answered. The boot checklist runs a probe
+inside the domain, one outside it, and one after a removal, and asserts each by
+the *deltas*: the counters are machine-lifetime, the self-test's own jets run
+before any rule exists, so `native_runs` starts at 2 and the assertion is `+1`
+on the path that answered rather than an absolute number. `!` alone reports the
+split on demand; live, the rule answered 9 + 5 = 14 and the native 1000 + 2000
+= 3000, and the report before the rule was put away said "the rule has answered
+3 probes, the native 6" (Step 6's removal probe is the extra native probe that
+Step 5's "native 5" became). The session evaluates a line's answer twice (once
+for the entry, once for the new session), which is idempotent, so a jetting
+line fires twice and gains two probes per line -- that is measured and said,
+not hidden.
 
 **Refusals are by name.** The ways to be wrong are each named with the pair that
 caught them: a definition that lies (`+add(0, 0) = 3`), a definition that stops
@@ -151,13 +154,51 @@ so the coverage is the checklist's own 2080-pair battery plus this wire-level
 test, which is what a claim about a running machine should be.
 
 **What it does not do, said plainly.** No opcode changed and no arithmetic
-changed; the compiler's refusal of `+(a b)` for runtime operands stands; there
-is no way to remove an accepted rule, and the machine says so (a later step);
-and a bounded battery is a bounded proof -- for `a + b < 64` the machine does
-not need its `+add` native, and for everything else it still does (item 26).
+changed; the compiler's refusal of `+(a b)` for runtime operands stands;
+removal is a record and Step 6's own, below; and a bounded battery is a bounded
+proof -- for `a + b < 64` the machine does not need its `+add` native, and for
+everything else it still does (item 26).
+
+## Where Step 6 stands
+
+**Green.** A rule can be put away, and the putting away is a record. The line
+`! 0 0` -- the primitive's index, then the empty definition -- takes the rule
+for `+add` back down to the row it was born with, and the machine says so:
+"yes.  +add is no longer a rule; the C native answers everywhere again." The
+definition is discarded, never replaced, and nothing is re-checked, because a
+removal claims nothing: the record's answer half is 0, the way an install's is
+its certified limit. Item 27 is the design, written down before the code.
+
+**A removal is a record because replay is the notebook's last word.** The
+install was written down as a record, so the removal is written down next to
+it: typed `! 0 0` is echoed `! 0 0: 0`. On a later boot the checklist installs
+the certified `+add`, then the notebook's records replay in order, and the last
+word on a primitive wins -- a notebook ending in an install leaves the rule in,
+one ending in a removal leaves it away, exactly as a session line's records do.
+The boot checklist's own install always runs before the restore, so it can
+never fight a removal, and a removal record replayed therefore always has a
+rule to remove.
+
+**What is refused, by name.** `! 0 0` when the rule is already gone -- removed
+moments ago, or never accepted -- is refused: "there is no rule for +add to
+remove". `! 0 0: 64` is refused, because a rule of nothing claims nothing and a
+removal's record is `: 0`. Both are the same instinct item 26 had: a claim the
+machine cannot back up is a premise it declines to take.
+
+**The checklist proves the direction on every boot.** After the battery and the
+split, `gb_rules_ok` removes the rule, probes inside the former domain, and the
+counters must show the native answering while the rule moves nothing, then
+reinstalls so a boot lands where it always did. `make rules-test` proves it on
+the wire, from the same boots that already proved install and replay: a jet
+`+add(9, 5)` still answers 14 after removal, now by the native; the report says
+"the C native answers"; a notebook replayed on a fresh boot ends with the
+removal holding and a second `! 0 0` refused as "no rule to remove"; and the
+removal record neither doubles itself on replay (a checked record is not
+re-echoed, as with installs) nor touches the session.
 
 **Green.** `make test` gives 139 checks, 0 failing, `LAMP: LIT`, and a checklist
-of 12 -- 11 of Step 1's own, plus the one Step 4 added. The machine boots into
+of 13 -- 11 of Step 1's own, plus the one Step 4 added and Step 5 and 6's own.
+The machine boots into
 long mode, reads a heap out of the PVH memory map, and runs the noun, Nock and
 primitive layers. Step 1 is finished: the twenty
 shortcuts are the whole of the trust base, and everything later stands on them.

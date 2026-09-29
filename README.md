@@ -25,8 +25,8 @@ No operating system, no libc, no bootloader, no disk, no network. The only piece
 of hardware it touches is the 16550 serial port at 0x3f8, polled, one byte at a
 time.
 
-The whole machine is 2,906 lines, counting non-blank lines with `/* */` and
-`//` comments stripped: 133 of assembly to reach long mode, 1,793 of C, 852 of
+The whole machine is 2,956 lines, counting non-blank lines with `/* */` and
+`//` comments stripped: 133 of assembly to reach long mode, 1,843 of C, 852 of
 tests, and 128 of headers. `make lines` runs the count, so the figure is a
 command and not a claim. (Stated that way because the previous figure, 1,991,
 could not be reproduced by any counting method and was therefore not worth
@@ -64,7 +64,7 @@ make teach  # compile eleven expressions and watch the guest run them
 make notebook  # run the guest book with a notebook on the host (Step 4)
 make notebook-test  # SIGKILL the machine, reboot, and check the session came back
 make notebook-forget  # throw the notebook away, on purpose
-make rules-test  # a rule sent as text, checked in full, re-verified from the notebook
+make rules-test  # a rule sent as text, checked in full, re-verified from the notebook, and put away
 make debug  # boot it with QEMU stopped at the reset vector
 make lines  # count the machine's lines, the way this README counts them
 make clean
@@ -180,7 +180,10 @@ with its own interpreter and compares each answer with its own native. Only then
 is the rule installed and written down as a record, and on a later boot the
 record is re-verified rather than believed. Inside the domain the rule answers,
 outside it the native does, and the machine counts and reports which path
-answered. `make rules-test` is the claim, run from `make check`.
+answered. Step 6 put it away: `! 0 0` removes the rule, echoed as the record
+`! 0 0: 0`, and replay is the notebook's last word -- a records file that ends
+in a removal boots without the rule. `make rules-test` is the claim, run from
+`make check`.
 
 ## Layout
 
@@ -238,9 +241,11 @@ This matters more than the feature list, so it is stated plainly.
   full (all 2080 pairs of `a + b < 64`) before it is installed, jetted answers
   come from the rule in-domain and from the C native out of it with the counters
   to prove which, a `!` record fed back on a later boot is re-verified rather
-  than trusted, and a record or definition that lies is refused by name -- with
-  the definition's 992 characters in the Makefile required to match the machine's
-  own echo byte for byte
+  than trusted, a record or definition that lies is refused by name, and putting
+  the rule away is also a record: `! 0 0` is echoed `! 0 0: 0`, a replayed
+  notebook's last word on a primitive wins, and a removal with nothing to remove
+  is refused by name -- with the definition's 992 characters in the Makefile
+  required to match the machine's own echo byte for byte
 - three of the twenty primitives against their Nock definitions, in `make proofs`:
   `+inc`, `+eq` and `+not` are read by the machine's own reader, printed back by
   the machine's own printer, run by the machine's own interpreter, and required to

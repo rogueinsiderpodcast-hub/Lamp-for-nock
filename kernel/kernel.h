@@ -201,7 +201,7 @@ u64             prim_call(int index, u64 a, u64 b);
  * used where the bound says the check ran.  decisions.md item 26. */
 int  prim_rule_domain(int index, u64 *limit); /* 1 if a bounded domain exists */
 int  prim_rule_state(int index, noun *def);   /* 1 if a rule is installed */
-void prim_rule_set(int index, noun def);      /* installed after the battery */
+void prim_rule_set(int index, noun def);      /* installed after the battery; 0 puts it away */
 void prim_rule_gate(int index);               /* battery mode: index is being checked */
 void prim_rule_ungate(void);
 int  prim_rule_probe(int index, u64 a, u64 b, u64 *result);
