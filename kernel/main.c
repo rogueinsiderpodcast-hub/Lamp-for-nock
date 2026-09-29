@@ -158,8 +158,16 @@ void kmain(u64 boot_params_phys)
          "a formula typed at the machine runs, and what it leaves behind matters");
     step(gb_journal_ok(),
          "a record the machine wrote can be read back, run, and checked against the answer it claims");
-    step(gb_rules_ok(),
+    u64 rules_before = noun_cell_count();
+    int rules_ok = gb_rules_ok();
+    u64 rules_cells = noun_cell_count() - rules_before;
+    step(rules_ok,
          "a rule sent as text is checked exhaustively before it is used, a lie is refused by name, a rule put away stops answering, and the counters tell which path answered");
+    serial_puts("         the two rule batteries settled at ");
+    serial_put_dec(rules_cells);
+    serial_puts(" of ");
+    serial_put_dec(noun_capacity());
+    serial_puts(" cells\n");
     step(failures == 0, "every self-test check passed");
 
     int lit = failures == 0 && checklist_pass == checklist_total;

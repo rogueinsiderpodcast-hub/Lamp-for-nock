@@ -25,9 +25,9 @@ No operating system, no libc, no bootloader, no disk, no network. The only piece
 of hardware it touches is the 16550 serial port at 0x3f8, polled, one byte at a
 time.
 
-The whole machine is 2,956 lines, counting non-blank lines with `/* */` and
-`//` comments stripped: 133 of assembly to reach long mode, 1,843 of C, 852 of
-tests, and 128 of headers. `make lines` runs the count, so the figure is a
+The whole machine is 3,043 lines, counting non-blank lines with `/* */` and
+`//` comments stripped: 133 of assembly to reach long mode, 1,922 of C, 852 of
+tests, and 136 of headers. `make lines` runs the count, so the figure is a
 command and not a claim. (Stated that way because the previous figure, 1,991,
 could not be reproduced by any counting method and was therefore not worth
 carrying, and because a number nobody can re-derive is a number nobody should
@@ -35,8 +35,9 @@ trust: the method is `tools/lines.awk`, and it is awk because a `/*` comment can
 open on one line and close on another, which any per-line filter gets wrong.
 The 852 of tests are 262 checks over the noun layer, the interpreter, the
 primitives, the reader and the book; the rules claim is not in them, because the
-2080-pair battery fits the machine's arena and not the host's, so it is made
-in-kernel, by the checklist item that runs the battery and by `make rules-test`.
+2080-pair `+add` battery and the 892-pair `+mul` one fit the machine's arena and
+not the host's, so they are made
+in-kernel, by the checklist item that runs the batteries and by `make rules-test`.
 The host compiler in `tools/hoon.c` is 951
 lines and is *not* in this figure, because it is not part of the machine — it is
 the thing that feeds it, and neither is `tools/jet-proofs.c`.) It
@@ -175,20 +176,27 @@ hand-edited notebook cannot quietly become a session.
 **Step 5 is in:** `! 0 <definition>` typed at the same prompt as everything else
 is a rule -- a Nock formula claiming to be a primitive. Before it may be used,
 the machine checks the claim on the wire: it runs every pair in the primitive's
-certified domain (`a + b < 64` for `+add`, 2080 pairs, near 2.4 million cells)
+certified domain (`a + b < 64` for `+add`, 2080 pairs, near 1.9 million cells)
 with its own interpreter and compares each answer with its own native. Only then
 is the rule installed and written down as a record, and on a later boot the
 record is re-verified rather than believed. Inside the domain the rule answers,
 outside it the native does, and the machine counts and reports which path
 answered. Step 6 put it away: `! 0 0` removes the rule, echoed as the record
 `! 0 0: 0`, and replay is the notebook's last word -- a records file that ends
-in a removal boots without the rule. `make rules-test` is the claim, run from
-`make check`.
+in a removal boots without the rule. Step 7 made a rule a property of the
+machine rather than of one primitive: `+mul` is a rule over `a * b < 128` (with
+both operands under 128, so the set is finite -- 892 pairs, 1.4 million cells),
+`! 2 <definition>` is the same record shape, and a domain is a *shape* and a
+number rather than a number. Step 7 also found and fixed a Step 1 bug: the
+kernel's identity page map covered only the low 64 MiB while the bump allocator
+trusted the boot memory map for the whole heap, so the machine promised nearly
+twice the cells it had pages for and triple-faulted the first time a session
+checked a second rule. `make rules-test` is the claim, run from `make check`.
 
 ## Layout
 
 ```
-boot/boot.S        PVH entry, 32-bit -> 64-bit, stack, .bss zeroing
+boot/boot.S        PVH entry, 32-bit -> 64-bit, identity map, stack, .bss zeroing
 boot/link.ld       one load segment at 0x100000
 kernel/kernel.h    the only header
 kernel/serial.c    polled 16550 UART
@@ -238,14 +246,20 @@ This matters more than the feature list, so it is stated plainly.
   session that came back with its history -- plus a record whose answer does not
   reproduce, which is refused by name and leaves the session alone
 - the rules, in `make rules-test`: a rule typed at the machine is checked in
-  full (all 2080 pairs of `a + b < 64`) before it is installed, jetted answers
+  full (all 2080 pairs of `a + b < 64` for `+add`, all 892 of `a * b < 128` with
+  both operands under 128 for `+mul`) before it is installed, jetted answers
   come from the rule in-domain and from the C native out of it with the counters
   to prove which, a `!` record fed back on a later boot is re-verified rather
   than trusted, a record or definition that lies is refused by name, and putting
   the rule away is also a record: `! 0 0` is echoed `! 0 0: 0`, a replayed
   notebook's last word on a primitive wins, and a removal with nothing to remove
-  is refused by name -- with the definition's 992 characters in the Makefile
-  required to match the machine's own echo byte for byte
+  is refused by name -- with the definitions' 992 and 736 characters in the
+  Makefile required to match the machine's own echo byte for byte
+- the arena claim itself: the checklist reports the cells its two rule batteries
+  settled at against what the arena holds (3,352,981 of 8,316,544), and the
+  kernel's identity page map covers the whole heap so that number is cells the
+  machine can actually write -- the first time a session checked a second rule,
+  the old 64 MiB map triple-faulted on a promise it had no pages for (item 29)
 - three of the twenty primitives against their Nock definitions, in `make proofs`:
   `+inc`, `+eq` and `+not` are read by the machine's own reader, printed back by
   the machine's own printer, run by the machine's own interpreter, and required to

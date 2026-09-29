@@ -504,6 +504,28 @@ static const char *gb_colon_in(u64 from)
     return NULL;
 }
 
+/* What a primitive's domain is, in the machine's own words.  The shape is part
+ * of the claim: a number alone would read the same for a sum and a product.
+ * (decisions.md item 28.) */
+static void gb_print_domain(int index, u64 limit)
+{
+    switch (prim_rule_shape(index)) {
+    case RULE_SHAPE_SUM:
+        serial_puts("a + b < ");
+        serial_put_dec(limit);
+        break;
+    case RULE_SHAPE_PRODUCT:
+        serial_puts("a * b < ");
+        serial_put_dec(limit);
+        serial_puts(" with a and b each under ");
+        serial_put_dec(limit);
+        break;
+    default:
+        serial_puts("none");
+        break;
+    }
+}
+
 /* The machine says what a primitive currently is, and how its two possible
  * answers have actually divided the probes.  `!` alone reports every primitive
  * with a certified domain; `! 0` reports only the one. */
@@ -527,8 +549,8 @@ static void gb_rule_report(int index)
         serial_puts(" has no certified domain, so no rule is accepted for it.\n");
         return;
     }
-    serial_puts(": domain a + b < ");
-    serial_put_dec(limit);
+    serial_puts(": domain ");
+    gb_print_domain(index, limit);
     serial_puts(".  ");
     serial_puts(installed ? "the rule is installed" : "the C native answers");
     serial_puts(";  the rule has answered ");
@@ -538,14 +560,16 @@ static void gb_rule_report(int index)
     serial_puts(".\n");
 }
 
-/* The battery: every pair with a + b < limit, once, in order.  Prints a dot
- * every 256 pairs so a check that is doing the honest thing can be watched
- * doing it, and says, on the first pair that failed, exactly what failed.
- * The definition runs with the machine's own reader and its own interpreter
- * under the gate, so a rule that tries to answer by calling the primitive it
- * defines has its probe declined and its own fallback judged instead.  Leaves
- * the machine's error state clear, because a refusal is not a crash. */
-static int gb_rule_verify(int index, noun def)
+/* The battery: every pair the primitive's domain contains, once, in order, with
+ * the pairs counted by the shape of the domain rather than by a formula -- the
+ * count the machine prints is the count it ran.  Prints a dot every 256 pairs so
+ * a check that is doing the honest thing can be watched doing it, and says, on
+ * the first pair that failed, exactly what failed.  The definition runs with the
+ * machine's own reader and its own interpreter under the gate, so a rule that
+ * tries to answer by calling the primitive it defines has its probe declined and
+ * its own fallback judged instead.  Leaves the machine's error state clear,
+ * because a refusal is not a crash. */
+static int gb_rule_verify(int index, noun def, u64 *pairs)
 {
     const prim_entry *e = prim_get(index);
     u64 limit = 0;
@@ -555,7 +579,12 @@ static int gb_rule_verify(int index, noun def)
 
     u64 done = 0;
     for (u64 a = 0; a < limit; a++) {
-        for (u64 b = 0; a + b < limit; b++) {
+        for (u64 b = 0; b < limit; b++) {
+            /* For a fixed a, both domains hold for b up to a bound and not past
+             * it -- the sum's is a + b < limit, the product's is a * b < limit --
+             * so the first pair outside the domain ends this a's row. */
+            if (!prim_rule_in_domain(index, a, b))
+                break;
             if (done != 0 && (done & 255u) == 0)
                 serial_putc('.');
             done++;
@@ -625,6 +654,8 @@ static int gb_rule_verify(int index, noun def)
             }
         }
     }
+    if (pairs != NULL)
+        *pairs = done;
     return 1;
 }
 
@@ -767,7 +798,8 @@ static void gb_rule(void)
         }
     }
 
-    if (!gb_rule_verify((int)index, def))
+    u64 pairs = 0;
+    if (!gb_rule_verify((int)index, def, &pairs))
         return;
 
     prim_rule_set((int)index, def);
@@ -777,9 +809,9 @@ static void gb_rule(void)
     serial_puts(" is now a rule, sent as text and checked in full: ");
     u64 limit = 0;
     prim_rule_domain((int)index, &limit);
-    serial_put_dec(limit * (limit + 1) / 2);
-    serial_puts(" pairs with a + b < ");
-    serial_put_dec(limit);
+    serial_put_dec(pairs);
+    serial_puts(" pairs with ");
+    gb_print_domain((int)index, limit);
     serial_puts(", and it\n");
     serial_puts("  answered the native on every one.  for those pairs the\n");
     serial_puts("  machine answers without its C ");
@@ -812,83 +844,112 @@ int gb_rules_ok(void)
     /* The refusal suite: a lie is refused by the pair it disagreed on, a
      * definition that stops is refused by what it stopped at, and a definition
      * that tries to answer by calling the primitive it defines is refused
-     * because its probe was declined and its own fallback was judged. */
-    static const char wrong[]  = "[1 3 0]"; /* the constant 3: disagrees at +add(0, 0) */
+     * because its probe was declined and its own fallback was judged.  The
+     * suite is the same for every rule primitive: what it tests is the record
+     * and the gate, not the arithmetic behind them. */
+    static const char wrong[]  = "[1 3 0]"; /* the constant 3: disagrees at (0, 0) */
     static const char stopped[] = "[0 0 0]"; /* axis 0: a path that names nothing */
     static const char selfdef[] = "[11 [0 [1 [[2 3] 0]]] [0 2 0] 0]"; /* hints +add(2,3), replies a */
     static const char adddef[] =
         "[9 [126 [[10 [[126 [1 [[6 [[5 [[0 [62 0]] [[1 [0 0]] 0]]] [[6 [[5 [[0 [14 0]] [[0 [2 0]] 0]]] [[9 [126 [[10 [[126 [0 [126 0]]] [[10 [[62 [1 [1 0]]] [[10 [[30 [0 [30 0]]] [[10 [[14 [1 [0 0]]] [[10 [[6 [0 [6 0]]] [[10 [[2 [0 [2 0]]] [[1 [[0 [0 [0 [0 [0 [0 0]]]]]] 0]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] [[9 [126 [[10 [[126 [0 [126 0]]] [[10 [[62 [1 [0 0]]] [[10 [[30 [4 [[0 [30 0]] 0]]] [[10 [[14 [4 [[0 [14 0]] 0]]] [[10 [[6 [0 [6 0]]] [[10 [[2 [0 [2 0]]] [[1 [[0 [0 [0 [0 [0 [0 0]]]]]] 0]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]]] [[6 [[5 [[0 [14 0]] [[0 [6 0]] 0]]] [[0 [30 0]] [[9 [126 [[10 [[126 [0 [126 0]]] [[10 [[62 [1 [1 0]]] [[10 [[30 [4 [[0 [30 0]] 0]]] [[10 [[14 [4 [[0 [14 0]] 0]]] [[10 [[6 [0 [6 0]]] [[10 [[2 [0 [2 0]]] [[1 [[0 [0 [0 [0 [0 [0 0]]]]]] 0]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]]] 0]]]] 0]]] [[10 [[62 [1 [0 0]]] [[10 [[30 [1 [0 0]]] [[10 [[14 [1 [0 0]]] [[10 [[6 [0 [6 0]]] [[10 [[2 [0 [2 0]]] [[1 [[0 [0 [0 [0 [0 [0 0]]]]]] 0]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]]";
+    static const char muldef[] =
+        "[9 [126 [[10 [[126 [1 [[6 [[5 [[0 [14 0]] [[0 [6 0]] 0]]] [[0 [62 0]] [[6 [[5 [[0 [30 0]] [[0 [2 0]] 0]]] [[9 [126 [[10 [[126 [0 [126 0]]] [[10 [[2 [0 [2 0]]] [[10 [[6 [0 [6 0]]] [[10 [[14 [4 [[0 [14 0]] 0]]] [[10 [[30 [1 [0 0]]] [[10 [[62 [0 [62 0]]] [[1 [[0 [0 [0 [0 [0 [0 0]]]]]] 0]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] [[9 [126 [[10 [[126 [0 [126 0]]] [[10 [[2 [0 [2 0]]] [[10 [[6 [0 [6 0]]] [[10 [[14 [0 [14 0]]] [[10 [[30 [4 [[0 [30 0]] 0]]] [[10 [[62 [4 [[0 [62 0]] 0]]] [[1 [[0 [0 [0 [0 [0 [0 0]]]]]] 0]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]]] 0]]]] 0]]] [[10 [[62 [1 [0 0]]] [[10 [[30 [1 [0 0]]] [[10 [[14 [1 [0 0]]] [[10 [[6 [0 [6 0]]] [[10 [[2 [0 [2 0]]] [[1 [[0 [0 [0 [0 [0 [0 0]]]]]] 0]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]]";
 
-    noun a, b, c, d;
+    /* One row per rule primitive: the domain it claims, the definition that is
+     * its own, and a pair inside and a pair outside that domain.  The two
+     * definitions are different arithmetic on differently shaped domains; every
+     * other thing the checklist asks of a rule is asked of both. */
+    static const struct {
+        int         index;
+        u64         limit;
+        const char *def;
+        u64         def_len;
+        u64         in_a, in_b, in_want;
+        u64         out_a, out_b, out_want;
+    } rules[] = {
+        { 0, RULE_ADD_LIMIT, adddef, sizeof adddef - 1,  3, 4,     7, 2000, 1000,    3000 },
+        { 2, RULE_MUL_LIMIT, muldef, sizeof muldef - 1,  3, 4,    12, 2000, 1000, 2000000 },
+    };
+
+    noun a, b, c, def;
     const char *why = "";
-    u64 limit = 0;
     int all = 1;
+    u64 pairs = 0;
 
-    if (!prim_rule_domain(0, &limit) || limit != RULE_ADD_LIMIT)
-        all = 0;
-    if (prim_rule_state(0, NULL))
-        all = 0;                              /* nothing installed at boot */
+    for (unsigned r = 0; r < sizeof rules / sizeof rules[0]; r++) {
+        int index = rules[r].index;
+        u64 limit = 0;
 
-    if (gb_parse(wrong, sizeof wrong - 1, &a, &why) != GB_PARSE_OK)
-        all = 0;
-    if (all && gb_rule_verify(0, a))          /* constant 3: fails at +add(0, 0) */
-        all = 0;
-    if (all && prim_rule_state(0, NULL))
-        all = 0;
+        if (!prim_rule_domain(index, &limit) || limit != rules[r].limit)
+            all = 0;
+        if (prim_rule_state(index, NULL))
+            all = 0;                          /* nothing installed at boot */
 
-    if (gb_parse(stopped, sizeof stopped - 1, &b, &why) != GB_PARSE_OK)
-        all = 0;
-    if (all && gb_rule_verify(0, b))          /* axis 0: stops at once */
-        all = 0;
+        if (gb_parse(wrong, sizeof wrong - 1, &a, &why) != GB_PARSE_OK)
+            all = 0;
+        if (all && gb_rule_verify(index, a, &pairs))   /* the lie: fails at (0, 0) */
+            all = 0;
+        if (all && prim_rule_state(index, NULL))
+            all = 0;
 
-    if (gb_parse(selfdef, sizeof selfdef - 1, &c, &why) != GB_PARSE_OK)
-        all = 0;
-    if (all && gb_rule_verify(0, c))          /* hints +add, then says a: +add(0,1) */
-        all = 0;
+        if (gb_parse(stopped, sizeof stopped - 1, &b, &why) != GB_PARSE_OK)
+            all = 0;
+        if (all && gb_rule_verify(index, b, &pairs))   /* axis 0: stops at once */
+            all = 0;
 
-    if (gb_parse(adddef, sizeof adddef - 1, &d, &why) != GB_PARSE_OK)
-        all = 0;
-    if (all && !gb_rule_verify(0, d))         /* the real definition passes */
-        all = 0;
-    if (all) {
-        prim_rule_set(0, d);
+        if (gb_parse(selfdef, sizeof selfdef - 1, &c, &why) != GB_PARSE_OK)
+            all = 0;
+        if (all && gb_rule_verify(index, c, &pairs))   /* the self-call: fallback judged */
+            all = 0;
+
+        if (gb_parse(rules[r].def, rules[r].def_len, &def, &why) != GB_PARSE_OK)
+            all = 0;
+        if (all && !gb_rule_verify(index, def, &pairs)) /* the real definition passes */
+            all = 0;
+        if (!all)
+            continue;
+
+        prim_rule_set(index, def);
 
         /* The counters count for the machine's whole life, so the probes are
          * judged by what they move: the first must answer by the definition and
          * move nothing else, the second by the native. */
-        u64 rt0 = prim_rule_runs(0);
-        u64 nt0 = prim_native_runs(0);
+        u64 rt0 = prim_rule_runs(index);
+        u64 nt0 = prim_native_runs(index);
 
         u64 res = 0;
         machine_reset_error();
-        if (prim_rule_probe(0, 3, 4, &res) != 0 || res != 7)
+        if (prim_rule_probe(index, rules[r].in_a, rules[r].in_b, &res) != 0
+            || res != rules[r].in_want)
             all = 0;
-        if (prim_rule_runs(0) != rt0 + 1 || prim_native_runs(0) != nt0)
+        if (prim_rule_runs(index) != rt0 + 1 || prim_native_runs(index) != nt0)
             all = 0;
 
         machine_reset_error();
         res = 0;
-        if (prim_rule_probe(0, 2000, 1000, &res) != 0 || res != 3000)
+        if (prim_rule_probe(index, rules[r].out_a, rules[r].out_b, &res) != 0
+            || res != rules[r].out_want)
             all = 0;                          /* outside the domain: the native */
-        if (prim_native_runs(0) != nt0 + 1)
+        if (prim_native_runs(index) != nt0 + 1)
             all = 0;
 
         /* Removal (item 27): the empty definition takes the rule back down to
          * the row it was born with, and a probe inside the former domain must
          * then be answered by the native -- the counters are the proof, since
          * a removed rule cannot tell the two paths apart by value. */
-        prim_rule_set(0, 0);
-        if (prim_rule_state(0, NULL))
+        prim_rule_set(index, 0);
+        if (prim_rule_state(index, NULL))
             all = 0;
-        u64 rt1 = prim_rule_runs(0);
-        u64 nt1 = prim_native_runs(0);
+        u64 rt1 = prim_rule_runs(index);
+        u64 nt1 = prim_native_runs(index);
         machine_reset_error();
         res = 0;
-        if (prim_rule_probe(0, 3, 4, &res) != 0 || res != 7)
+        if (prim_rule_probe(index, rules[r].in_a, rules[r].in_b, &res) != 0
+            || res != rules[r].in_want)
             all = 0;
-        if (prim_rule_runs(0) != rt1 || prim_native_runs(0) != nt1 + 1)
+        if (prim_rule_runs(index) != rt1 || prim_native_runs(index) != nt1 + 1)
             all = 0;
-        prim_rule_set(0, d);                  /* and put it back, as a boot lands */
+        prim_rule_set(index, def);            /* and put it back, as a boot lands */
     }
     machine_reset_error();
     return all;

@@ -7,8 +7,8 @@ rewritten every time the state changes.
 
 ## The machine this is a piece of
 
-Lamp is Step 1 of five. Each step adds exactly one idea, and stopping after any
-of them still leaves something real.
+Lamp is on its seventh step. Each step adds exactly one idea, and stopping after
+any of them still leaves something real.
 
 | Step | One-sentence goal | New idea | State |
 |---|---|---|---|
@@ -18,6 +18,7 @@ of them still leaves something real.
 | **4. Notebook** | The guest book survives the power being turned off. | durability | **green — the log is written down as it runs, and replayed on the next boot** |
 | **5. New Rules** | The machine rewrites its own behaviour from text you send it, and cannot be broken by it. | 5, it cannot be lied to | **green — a rule is text, checked in full before it is allowed to be behaviour** |
 | **6. Rule removal** | An accepted rule can be put away, and the putting away is a record. | 6, the empty definition | **green — `! 0 0` puts the rule away, echoed as the record `! 0 0: 0`, and the notebook's last word wins** |
+| **7. A second rule** | A rule is not special to one primitive, and the machine has as many pages as it has rules. | the shape of a domain is part of the row | **green — `+mul` is a rule over `a * b < 128`, and the identity map covers the heap (item 29)** |
 | ~~Wire~~ | ~~Networking~~ | | deferred indefinitely |
 
 **Step 3 is the bridge.** The compiler stays on the host: you type into
@@ -113,8 +114,10 @@ before any rule exists, so `native_runs` starts at 2 and the assertion is `+1`
 on the path that answered rather than an absolute number. `!` alone reports the
 split on demand; live, the rule answered 9 + 5 = 14 and the native 1000 + 2000
 = 3000, and the report before the rule was put away said "the rule has answered
-3 probes, the native 6" (Step 6's removal probe is the extra native probe that
-Step 5's "native 5" became). The session evaluates a line's answer twice (once
+132 probes, the native 6" (Step 6's removal probe is the extra native probe that
+Step 5's "native 5" became, and Step 7's `+mul` battery runs 129 `+add(2, 3)`
+hints inside its self-calling case, which is the rest of the jump from 3). The
+session evaluates a line's answer twice (once
 for the entry, once for the new session), which is idempotent, so a jetting
 line fires twice and gains two probes per line -- that is measured and said,
 not hidden.
@@ -196,9 +199,69 @@ removal holding and a second `! 0 0` refused as "no rule to remove"; and the
 removal record neither doubles itself on replay (a checked record is not
 re-echoed, as with installs) nor touches the session.
 
-**Green.** `make test` gives 139 checks, 0 failing, `LAMP: LIT`, and a checklist
-of 13 -- 11 of Step 1's own, plus the one Step 4 added and Step 5 and 6's own.
-The machine boots into
+## Where Step 7 stands
+
+**Green, and the point of it is that a rule is not a feature of one primitive.**
+`+mul` is now a rule like `+add`: the line is `! 2 <definition>`, the record is
+`! 2 <definition>: 128`, it is put away with `! 2 0`, and every refusal Step 5
+and 6 named for `+add` is named for `+mul` too, in the same words. Nothing in
+the grammar, the record shape, the replay or the gate changed. The 736-character
+definition is item 28's, it counts up twice and never subtracts, and its battery
+runs 892 pairs and settles at 1,406,432 cells against `+add`'s 2080 pairs and
+1,926,080. The machine says the sum out loud on every boot: "the two rule
+batteries settled at 3352981 of 8316544 cells".
+
+**A domain is a shape and a number, and the shape is part of the row.** `+add`
+is bounded by the sum of its operands, `+mul` by their product, and the probe
+that decides whether a rule answers, the report that says what a primitive is,
+and the battery that enumerates the domain all have to ask which they are
+looking at. The product bound needed a clause to be finite at all -- `0 * b` is
+inside `a * b < 128` for every `b`, and a domain a battery cannot enumerate is
+not a domain the machine has checked -- so the row is `a * b < 128` with both
+operands under 128, which is 892 pairs and costs nothing honest, because when
+both operands are positive the product bound already puts each under 128. The
+in-domain tests compare against the limit by division and never form `a + b` or
+`a * b`, both of which wrap on large operands and would certify a pair as inside
+the domain that is nowhere near it.
+
+**A domain the machine cannot map is a promise with no pages behind it.** The
+whole of Step 7's guest-side measurement was blocked for a while by a Step 1
+bug that eleven steps of writing had not found, and it is the one worth
+remembering. The kernel's initial page tables identity-mapped only the low 64
+MiB, from when that was all the machine asked for, while `mem_init` trusted the
+boot loader's memory map for the heap and `mem_alloc` handed pointers out of it.
+`noun_init` divided a 254 MiB heap in half and promised itself 8,316,544 cells,
+nearly twice what was really there. The batteries fit anyway, because they never
+quite reached the edge of what was mapped, so `make test` stayed green for six
+steps. The moment a session checked a *second* rule -- boot batteries plus a
+typed install -- the machine wrote past 64 MiB, page-faulted, triple-faulted
+because the IDT does not survive a second exception, and QEMU exited with
+nothing on the wire. The map now has 128 2 MiB leaves and covers the whole
+heap, and 8,316,544 cells is the truth. Item 29 has it, including why the
+readiness of the guest is the only thing that could have found it.
+
+**The lesson, kept because it is the same one twice.** A suite that counts
+events and a suite that checks values are not the same suite -- that is the
+jet bug above, found by going back to look for problems. This one is a claim
+the machine made about itself that nothing in the suite was asking it to keep:
+`make test` asked the batteries to pass, and they passed inside half the arena
+the machine had promised, which is exactly the shape of a passing test over a
+number nothing was cross-checking. The rule that came out of it is in item 29:
+the identity map has to cover the heap, because that is the contract the bump
+allocator already had with it.
+
+**Green, and both rules are covered on the wire.** Step 7 reused the rules
+check rather than adding a checklist item, because a rule is a rule. `make
+rules-test` now covers both primitives: `+add(9, 5) = 14` in-domain and `+add(1000,
+2000) = 3000` out of it, `+mul(9, 5) = 45` in-domain and `+mul(1000, 2000) =
+2000000` out of it, each read from the counters, each put away and each refused
+by name when it lies -- a `+mul` record claiming a sum domain is "claims a domain
+the machine does not certify", and a definition that says `+mul(0, 0) = 3` is
+caught by the battery. `make check` is green end to end.
+
+**Green.** `make test` gives 262 checks, 0 failing, `LAMP: LIT`, and a checklist
+of 13 -- 11 of Step 1's own, plus the one Step 4 added and the one Steps 5, 6
+and 7 share. The machine boots into
 long mode, reads a heap out of the PVH memory map, and runs the noun, Nock and
 primitive layers. Step 1 is finished: the twenty
 shortcuts are the whole of the trust base, and everything later stands on them.
@@ -408,14 +471,16 @@ from the pushed shape too — see item 22, where the shift that "should" be
    A 39-character formula costs 38 new cells and rewrites nothing. The cost of
    immutability here is that items have to be held until their order is known.
 4. **How much fits?** The arena is half the heap at 16 bytes a cell, and the
-   machine now says so: 8,317,184 cells with QEMU's 256MB, 406 used by the
-   self-test. A line costs about 3 cells at one character and about 4100 at a
+   machine now says so: 8,316,544 cells with QEMU's 256MB, 406 used by the
+   self-test -- and since item 29 every one of those is a cell the identity map
+   has a page for, which the number did not used to mean. A line costs about 3
+   cells at one character and about 4100 at a
    full 4096-character line, so a session runs to somewhere between tens of
    thousands and a couple of million entries -- and when the arena is full,
    `noun_cons` crashes rather than reusing, which is Step 4's problem to solve
    and not something to discover at. The reader's line limit, not the arena, is
    what a session of compiled formulas will run into first: at 4096 characters
-   it spends 4100 cells of 8,317,184, and the depth limit of 256 open brackets
+   it spends 4100 cells of 8,316,544, and the depth limit of 256 open brackets
    is the one reached first in practice.
 
 ## Where Step 3 stands

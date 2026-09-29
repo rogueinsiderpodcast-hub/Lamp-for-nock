@@ -339,12 +339,17 @@ check: test hoontest proofs notebook-test rules-test
 # copy below drifts from it, the battery refuses or the echo disagrees and this
 # test says so.
 #
-# ADD_DEF is item 23's +add, decision 23 wrote it down and decision 26 is the
-# rule that is checked over a + b < 64.  The counters are asserted as print, and
-# they are exact: the checklist itself now proves a removed rule stops answering
-# on every boot, which is one more native probe than Step 5's numbers had -- the
-# machine says so below, and this test is read against what the machine prints.
+# ADD_DEF and MUL_DEF are item 23's +add and item 28's +mul; decisions 26 and 28
+# are the rules they are checked over, a + b < 64 and a * b < 128.  The counters
+# are asserted as print, and they are exact: every boot runs both batteries in
+# the checklist, so both rules' probes and the +add hints inside the +mul
+# self-calling case are already on the tally before this test types anything --
+# the machine says so below, and this test is read against what the machine
+# prints.  The +mul install is a second battery in the same session, which is
+# why the identity map has to cover the whole heap (boot/boot.S) and not just
+# the low 64 MiB the machines once needed.
 ADD_DEF := [9 [126 [[10 [[126 [1 [[6 [[5 [[0 [62 0]] [[1 [0 0]] 0]]] [[6 [[5 [[0 [14 0]] [[0 [2 0]] 0]]] [[9 [126 [[10 [[126 [0 [126 0]]] [[10 [[62 [1 [1 0]]] [[10 [[30 [0 [30 0]]] [[10 [[14 [1 [0 0]]] [[10 [[6 [0 [6 0]]] [[10 [[2 [0 [2 0]]] [[1 [[0 [0 [0 [0 [0 [0 0]]]]]] 0]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] [[9 [126 [[10 [[126 [0 [126 0]]] [[10 [[62 [1 [0 0]]] [[10 [[30 [4 [[0 [30 0]] 0]]] [[10 [[14 [4 [[0 [14 0]] 0]]] [[10 [[6 [0 [6 0]]] [[10 [[2 [0 [2 0]]] [[1 [[0 [0 [0 [0 [0 [0 0]]]]]] 0]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]]] [[6 [[5 [[0 [14 0]] [[0 [6 0]] 0]]] [[0 [30 0]] [[9 [126 [[10 [[126 [0 [126 0]]] [[10 [[62 [1 [1 0]]] [[10 [[30 [4 [[0 [30 0]] 0]]] [[10 [[14 [4 [[0 [14 0]] 0]]] [[10 [[6 [0 [6 0]]] [[10 [[2 [0 [2 0]]] [[1 [[0 [0 [0 [0 [0 [0 0]]]]]] 0]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]]] 0]]]] 0]]] [[10 [[62 [1 [0 0]]] [[10 [[30 [1 [0 0]]] [[10 [[14 [1 [0 0]]] [[10 [[6 [0 [6 0]]] [[10 [[2 [0 [2 0]]] [[1 [[0 [0 [0 [0 [0 [0 0]]]]]] 0]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]]
+MUL_DEF := [9 [126 [[10 [[126 [1 [[6 [[5 [[0 [14 0]] [[0 [6 0]] 0]]] [[0 [62 0]] [[6 [[5 [[0 [30 0]] [[0 [2 0]] 0]]] [[9 [126 [[10 [[126 [0 [126 0]]] [[10 [[2 [0 [2 0]]] [[10 [[6 [0 [6 0]]] [[10 [[14 [4 [[0 [14 0]] 0]]] [[10 [[30 [1 [0 0]]] [[10 [[62 [0 [62 0]]] [[1 [[0 [0 [0 [0 [0 [0 0]]]]]] 0]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] [[9 [126 [[10 [[126 [0 [126 0]]] [[10 [[2 [0 [2 0]]] [[10 [[6 [0 [6 0]]] [[10 [[14 [0 [14 0]]] [[10 [[30 [4 [[0 [30 0]] 0]]] [[10 [[62 [4 [[0 [62 0]] 0]]] [[1 [[0 [0 [0 [0 [0 [0 0]]]]]] 0]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]]] 0]]]] 0]]] [[10 [[62 [1 [0 0]]] [[10 [[30 [1 [0 0]]] [[10 [[14 [1 [0 0]]] [[10 [[6 [0 [6 0]]] [[10 [[2 [0 [2 0]]] [[1 [[0 [0 [0 [0 [0 [0 0]]]]]] 0]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]] 0]]]
 
 # The rule that lies about its domain, and the rule that lies about +add.  Both
 # have to be refused, the first for claiming a domain the machine does not
@@ -374,7 +379,7 @@ rules-test: $(KERNEL)
 	    echo "make rules-test: FAILED -- +add(1000, 2000) was not answered outside the domain"; \
 	    sed -n '/== guest book/,$$p' $(BUILD)/rules1.log; exit 1; \
 	fi; \
-	if ! grep -q 'the rule has answered 3 probes, the native 6' $(BUILD)/rules1.log; then \
+	if ! grep -q 'the rule has answered 132 probes, the native 6' $(BUILD)/rules1.log; then \
 	    echo "make rules-test: FAILED -- the counters do not divide between the definition and the native"; \
 	    sed -n '/== guest book/,$$p' $(BUILD)/rules1.log; exit 1; \
 	fi; \
@@ -426,6 +431,58 @@ rules-test: $(KERNEL)
 	if ! grep -q 'the definition said +add(0, 0) is 3; the native says 0' $(BUILD)/rules4.log; then \
 	    echo "make rules-test: FAILED -- a definition that lies about +add was not refused by name"; \
 	    cat $(BUILD)/rules4.log; exit 1; \
+	fi; \
+	printf '! 2 $(MUL_DEF)\n[11 [2 [1 [[9 5] 0]]] [0 2 0] 0]\n[11 [2 [1 [[1000 2000] 0]]] [0 2 0] 0]\n!\n! 2 0\n[11 [2 [1 [[9 5] 0]]] [0 2 0] 0]\n!\n\004' \
+	  | $(QEMU) -kernel $(KERNEL) \
+	  | tee >(sed -n 's/\r$$//; /^[%!] /p' >> $(RULES_J2)) > $(BUILD)/rules5.log 2>&1; \
+	wait; \
+	if ! grep -q 'yes\.  +mul is now a rule, sent as text and checked in full: 892 pairs' $(BUILD)/rules5.log; then \
+	    echo "make rules-test: FAILED -- the +mul line was not checked in full before it was admitted"; \
+	    cat $(BUILD)/rules5.log; exit 1; \
+	fi; \
+	if ! grep -Fqx "! 2 $(MUL_DEF): 128" $(RULES_J2); then \
+	    echo "make rules-test: FAILED -- the +mul rule was not written down as a record with its product domain"; \
+	    grep -a '^! 2' $(RULES_J2); exit 1; \
+	fi; \
+	if ! grep -q '      jet  +mul(9, 5) = 45' $(BUILD)/rules5.log; then \
+	    echo "make rules-test: FAILED -- +mul(9, 5) was not answered inside the domain"; \
+	    sed -n '/== guest book/,$$p' $(BUILD)/rules5.log; exit 1; \
+	fi; \
+	if ! grep -q '      jet  +mul(1000, 2000) = 2000000' $(BUILD)/rules5.log; then \
+	    echo "make rules-test: FAILED -- +mul(1000, 2000) was not answered outside the domain"; \
+	    sed -n '/== guest book/,$$p' $(BUILD)/rules5.log; exit 1; \
+	fi; \
+	if ! grep -q 'the rule has answered 3 probes, the native 4' $(BUILD)/rules5.log; then \
+	    echo "make rules-test: FAILED -- the +mul counters do not divide between the definition and the native"; \
+	    grep -a '^  +mul:' $(BUILD)/rules5.log; exit 1; \
+	fi; \
+	if ! grep -Fqx "! 2 0: 0" $(RULES_J2); then \
+	    echo "make rules-test: FAILED -- the +mul removal was not written down as a record"; \
+	    grep -a '^! 2 0' $(RULES_J2); exit 1; \
+	fi; \
+	if ! grep -q 'yes\.  +mul is no longer a rule; the C native answers' $(BUILD)/rules5.log; then \
+	    echo "make rules-test: FAILED -- the +mul rule was not put away"; \
+	    sed -n '/== guest book/,$$p' $(BUILD)/rules5.log; exit 1; \
+	fi; \
+	if ! grep -q 'domain a \* b < 128 with a and b each under 128\.  the C native answers' $(BUILD)/rules5.log; then \
+	    echo "make rules-test: FAILED -- the +mul report does not say the native answers everywhere again"; \
+	    grep -a '^  +mul:' $(BUILD)/rules5.log; exit 1; \
+	fi; \
+	printf '! 2 $(MUL_DEF): 64\n\004' \
+	  | $(QEMU) -kernel $(KERNEL) \
+	  | tee >(sed -n 's/\r$$//; /^[%!] /p' >> $(RULES_J2)) > $(BUILD)/rules6.log 2>&1; \
+	wait; \
+	if ! grep -q 'claims a domain the machine does not' $(BUILD)/rules6.log; then \
+	    echo "make rules-test: FAILED -- a +mul record claiming a sum domain was taken"; \
+	    cat $(BUILD)/rules6.log; exit 1; \
+	fi; \
+	printf '! 2 [1 3 0]\n\004' \
+	  | $(QEMU) -kernel $(KERNEL) \
+	  | tee >(sed -n 's/\r$$//; /^[%!] /p' >> $(RULES_J2)) > $(BUILD)/rules7.log 2>&1; \
+	wait; \
+	if ! grep -q 'the definition said +mul(0, 0) is 3; the native says 0' $(BUILD)/rules7.log; then \
+	    echo "make rules-test: FAILED -- a definition that lies about +mul was not refused by name"; \
+	    cat $(BUILD)/rules7.log; exit 1; \
 	fi; \
 	echo "make rules-test: a rule is text, checked in full, re-verified out of the notebook, and put away by the same record shape"
 

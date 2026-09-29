@@ -95,14 +95,20 @@ _start:
     movl %eax, 0(%edi)
     movl $0, 4(%edi)
 
-    /* Identity map the low 64 MiB with 2 MiB leaves.  The transition into
+    /* Identity map the low 256 MiB with 2 MiB leaves.  The transition into
      * 64-bit mode touches linear addresses above the 8 MiB that four leaves
      * used to cover, so a 4-leaf map leaves a hole exactly there and the
-     * far jump faults on it.  Entries 128+ are left alone: the 4 KiB frames
-     * installed below live there. */
+     * far jump faults on it.  The map has to cover the whole heap, because
+     * mem_init trusts the e820 map for the heap's size and mem_alloc hands
+     * out of it: a map that stops short of the heap would let the noun
+     * arena promise more cells than are backed, and the first write past
+     * the mapped end would triple-fault with no Nock error to explain it.
+     * 128 leaves reach 256 MiB, which is the whole of a 256 MiB machine;
+     * entries 128+ are left alone because the 4 KiB frames installed
+     * below live there. */
     movl $pd, %edi
     xorl %eax, %eax
-    movl $32, %ecx
+    movl $128, %ecx
 3:  movl %eax, %edx
     orl  $0x83, %edx
     movl %edx, 0(%edi)

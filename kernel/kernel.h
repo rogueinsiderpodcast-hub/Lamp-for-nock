@@ -199,7 +199,25 @@ u64             prim_call(int index, u64 a, u64 b);
  * native.  The domain lives here and is the machine's own contract: a rule is
  * only accepted for a primitive the machine knows how to bound, and is only
  * used where the bound says the check ran.  decisions.md item 26. */
+
+/* A domain is a shape and a number, not a number.  +add is bounded by the sum
+ * of its operands and +mul by their product, and the probe, the report and the
+ * battery all have to ask which they are looking at.  decisions.md item 28. */
+typedef enum {
+    RULE_SHAPE_NONE = 0,   /* no domain: no rule is accepted for this primitive */
+    RULE_SHAPE_SUM,        /* a + b < limit, both operands below limit */
+    RULE_SHAPE_PRODUCT,    /* a * b < limit, both operands below limit */
+} rule_shape;
+
+/* The certified domains there are (decisions.md items 26 and 28): +add on the
+ * triangle a + b < 64, +mul on a * b < 128.  Each is the largest whose whole
+ * battery still settles in the guest's arena. */
+#define RULE_ADD_LIMIT 64u
+#define RULE_MUL_LIMIT 128u
+
 int  prim_rule_domain(int index, u64 *limit); /* 1 if a bounded domain exists */
+rule_shape prim_rule_shape(int index);       /* how the limit bounds the pair */
+int  prim_rule_in_domain(int index, u64 a, u64 b); /* 1 if a rule may answer here */
 int  prim_rule_state(int index, noun *def);   /* 1 if a rule is installed */
 void prim_rule_set(int index, noun def);      /* installed after the battery; 0 puts it away */
 void prim_rule_gate(int index);               /* battery mode: index is being checked */
@@ -207,11 +225,6 @@ void prim_rule_ungate(void);
 int  prim_rule_probe(int index, u64 a, u64 b, u64 *result);
 u64  prim_rule_runs(int index);               /* probes a rule's definition answered */
 u64  prim_native_runs(int index);             /* probes the C native answered */
-
-/* The one certified domain there is (decisions.md item 26): the machine's +add
- * is a definition on the triangle a + b < RULE_ADD_LIMIT, chosen as the largest
- * whose whole battery still settles in the guest's arena. */
-#define RULE_ADD_LIMIT 64u
 
 /* --- main.c ------------------------------------------------------------ */
 

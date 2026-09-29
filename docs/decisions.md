@@ -724,7 +724,7 @@ it fast, because every atom and every axis in a Nock formula is spelled out in
 brackets. Anything larger needs the jammer the earlier question leaned towards,
 and the jammer is the honest next step rather than a bigger number: a limit
 raised again and again is a protocol being reinvented badly. A 4096-character
-line costs about 4100 noun cells out of 8,317,184, so the reader's ceiling is
+line costs about 4100 noun cells out of 8,316,544, so the reader's ceiling is
 the binding constraint, not the machine's. The depth limit of 256 is the one
 that will bite first in practice, since every `=+` costs several levels. Until
 the jammer exists the ceiling is 4096 and the failure is a refusal by name
@@ -1222,3 +1222,108 @@ lie as an install claiming one it was not checked over). The checklist proves
 the new direction on every boot: remove, probe inside the former domain, and
 the probe must be answered by the native, then install again so a fresh boot
 lands where it always did.
+
+## 28. A second primitive gets a rule, and the shape of a domain is part of the row
+
+**Decided:** `+mul` gets a certified domain and may be sent a rule like any other
+primitive, and a domain is no longer a bare number. The row that carries a rule
+now also carries the *shape* of its domain, because `+add` and `+mul` are bounded
+by different things and a number cannot say which.
+
+**The shape is `a + b < 64` for `+add` and `a * b < 128` for `+mul`, with both
+operands under the limit.** The product bound is what the loop gives, so it is
+what the machine claims; the clause on the operands is there because the
+product bound alone is not a finite set -- `0 * b` is inside it for every `b` --
+and a domain a battery cannot enumerate is not a domain the machine has checked.
+The clause costs nothing honest: when both operands are positive, `a * b < 128`
+already puts each under 128. So the pairs `+mul` claims are the ones with
+`a * b < 128` and `a, b < 128`, which is 892 of them, and the battery runs all
+892.
+
+**The definition counts up twice and never subtracts.** Item 23's `+add` is a
+loop that decrements a counter through a second countdown core, which is why a
+turn of it costs 24 steps and a case costs `275 + 21*(a + b)` cells. `+mul` was
+written to avoid that shape: the same flat six-field core, `a` at `/2`, `b` at
+`/6`, `j` at `/14`, `i` at `/30`, the answer at `/62` and the arm at `/126`, but
+both loops count *up* to a target they never modify, so no arithmetic beyond
+`inc` and `eq` is needed and there is no inner countdown to pay for. The arm is
+three branches: if `j` has reached `b` the answer is `/62`; otherwise if `i` has
+reached `a` the turn is a new pass (`i := 0`, `j := j + 1`); otherwise the turn
+is one unit of the product (`i := i + 1`, answer `+1`). It is 736 characters,
+against `+add`'s 992, and the fresh-core constant, the build chain and the two
+rebuilds are the same skeleton as `+add`'s, field for field.
+
+**Measured, on the host:** every pair tried is right, including `0 * b`, `a * 0`
+and `15 * 8`, and the cost is linear in the product rather than quadratic -- 47
+steps a turn at `a = 1` and 25 at `a = 8`, no more than 6,000 steps for a case
+at the far corner of the domain. A single case stops at the call-depth ceiling
+near 1,700 turns, so depth, not the arena, is what bounds one case; and the
+deepest turn in this domain is 127, four percent of that ceiling.
+
+**Measured, on the guest:** the battery settles at 1,406,432 cells over its 892
+pairs, against `+add`'s 1,926,080 over 2,080 -- the two together 3,352,981 of the
+guest's 8,316,544, a little under half. The host, with 131,072 cells and no way
+to reset them, can run a 9-by-9 grid and no more: the same check the machine
+performs and the host cannot. Measuring the guest side of this is what turned up
+item 29: the number the machine was dividing by was twice what it had pages for.
+
+**What this changes in the machine, and why it is not just a second number.**
+Three places had the triangle written into them: the probe that decides whether
+a rule answers, the report that says what a primitive is, and the battery that
+enumerates the domain. All three now read the shape off the row. The probe's
+test is also written differently, because `a + b < limit` and `a * b < limit`
+both wrap on large operands: `a + b` on two atoms near 2^63 sums to a small
+number and would certify a pair as inside the domain that is nowhere near it,
+and the rule would then answer a question it was never checked on. The tests
+compare against `limit` by division and never form the product.
+
+**What this does not change.** No opcode, no hint, no new syntax: `! 2 <def>` is
+the same record shape as `! 0 <def>`, is refused in the same ways, is re-verified
+from the notebook on the next boot, and is put away by the same `! 2 0`. The
+gate is per index, so a `+mul` rule that tries to answer by calling `+mul` is
+still declined, and a `+mul` rule that calls `+add` is not -- it may use any
+primitive but the one it defines, which is the same contract `+add` has.
+
+## 29. The identity map has to cover the heap, and the arena is only as big as what is mapped
+
+**Decision.** The kernel's initial page tables identity-map the whole heap, not
+just the low 64 MiB the first boots needed, so a noun cell the machine says it
+has is a cell it can actually write.
+
+**How it was found.** Item 28's second battery did not run. The checklist's two
+batteries fit, and `make test` passed, because the boot only ever used about
+half the cells it claimed. The moment a session tried to check a rule a second
+time -- which is what `rules-test` has always done, and what Step 5 and 6 never
+paid for because the boot ran one battery, not two -- the machine stopped with
+no Nock error, no crash line, and QEMU simply exited. That is the shape of a
+triple fault, not a Nock refusal, so the fault itself had to be read out of
+QEMU's exception log: a page fault writing at `0x4000008`, sixty-four megabytes,
+and a triple fault on top of it because the IDT does not survive a second
+exception.
+
+**What was actually wrong.** `mem_init` trusts the boot loader's memory map for
+the heap's size, and `mem_alloc` hands pointers out of it. With QEMU's 256 MiB
+the map put the heap at `0x213000` to `0xffe0000`, about 254 MiB, so
+`noun_init` divided that in half and promised itself 8,316,544 cells. But
+`boot/boot.S` had been identity-mapping the low 64 MiB and nothing above it,
+from when that was all the machine asked for: thirty-two 2 MiB leaves, and a
+comment saying so. Every cell past 64 MiB was a promise with no page behind it.
+The first write into one faulted. `noun_capacity` was over-reporting by almost
+exactly two, and the batteries only fit because they had never quite reached
+the edge of what was really there.
+
+**The fix.** The map now has 128 2 MiB leaves instead of 32, which covers 256
+MiB -- the whole of a 256 MiB machine, and the whole of the heap the map
+advertises. Entries 128 and up are untouched, because the 4 KiB frames the
+3-level walk installs live there, and the low 64 leaves are still there for the
+1 MiB page the kernel itself is linked into. 8,316,544 cells is now the truth,
+and the check that the second battery runs in the guest -- a 5.28-million-cell
+session, boot and check together -- is inside a number the machine can stand
+behind.
+
+**What this does not change.** No opcode, no arena policy, no rule: the same
+`mem_alloc` returns the same kind of pointer, and the only observable difference
+is that a write past the old 64 MiB boundary now lands. The two limits are
+still two limits: the arena holds 8,316,544 cells because the heap is 254 MiB,
+and the identity map covers the heap because that is the contract the bump
+allocator already had with it.

@@ -215,26 +215,31 @@ u64 prim_call(int index, u64 a, u64 b)
  * and compared with the native by noun_equal -- before it may be used, and it
  * is only used inside the bound the check covered.  See decisions.md item 26.
  *
- * The domain is a triangle, the pairs with a + b < RULE_ADD_LIMIT, and it is
- * settled here because it is the machine's contract rather than the text's:
- * a rule is only accepted for a primitive the machine knows how to bound, and
- * a primitive with no domain can be sent all the rules it likes and every one
- * is refused without being read.  The limit was chosen as the largest triangle
- * whose whole battery still settles in the guest's arena: item 23's definition
- * costs 275 + 21*(a + b) cells a case, the triangle has N*(N+1)/2 cases, and
- * N = 64 settles at about 2.4 million cells, comfortably under the guest's
- * 8.3 million and far over the host's 131 thousand -- so this is a check the
- * machine can perform and the host could not. */
+ * The domain is a shape and a number, and the shape is settled here because it
+ * is the machine's contract rather than the text's: a rule is only accepted for
+ * a primitive the machine knows how to bound, and a primitive with no domain can
+ * be sent all the rules it likes and every one is refused without being read.
+ * +add's limit is the largest triangle whose whole battery still settles in the
+ * guest's arena -- item 23's definition costs 275 + 21*(a + b) cells a case, the
+ * triangle has N*(N+1)/2 cases, and N = 64 settles at about 2.4 million cells.
+ * +mul's is the largest product region whose battery does too: item 28's
+ * definition is checked over 892 pairs and settles at 1.4 million cells, so the
+ * two batteries together measure 3.35 million of the guest's 8.32 million.  Both
+ * are far over the host's 131 thousand -- so these are checks the machine can
+ * perform and the host cannot. */
 
 struct rule_slot {
     noun def;    /* the checked definition, or 0 when none is installed */
     u64  limit;  /* the certified domain, or 0 when there is no domain */
+    rule_shape shape; /* what the limit bounds */
 };
 
-/* One slot per bank entry; the designator gives +add (index 0) its domain and
- * every other primitive a zero limit, which means "no checkable domain". */
+/* One slot per bank entry; the designator gives +add (index 0) a sum domain and
+ * +mul (index 2) a product one, and every other primitive no domain at all,
+ * which means "no checkable domain". */
 static struct rule_slot rule_slots[sizeof(bank) / sizeof(bank[0])] = {
-    [0] = { 0, RULE_ADD_LIMIT },
+    [0] = { 0, RULE_ADD_LIMIT, RULE_SHAPE_SUM },
+    [2] = { 0, RULE_MUL_LIMIT, RULE_SHAPE_PRODUCT },
 };
 
 static u64 rule_runs[sizeof(bank) / sizeof(bank[0])];
@@ -258,6 +263,40 @@ int prim_rule_domain(int index, u64 *limit)
     if (limit != NULL)
         *limit = rule_slots[index].limit;
     return 1;
+}
+
+rule_shape prim_rule_shape(int index)
+{
+    if (index < 0 || index >= (int)RULE_LEN)
+        return RULE_SHAPE_NONE;
+    return rule_slots[index].shape;
+}
+
+/* Is this pair inside the primitive's certified domain?  Written by division
+ * and comparison rather than by forming the sum or the product, because these
+ * are 64-bit atoms: a + b on two operands near 2^63 wraps to a small number and
+ * a * b on two of them wraps to zero, and either would certify a pair as
+ * checked that is nowhere near the domain the battery ran.  A rule answering
+ * such a pair is not a wrong answer, it is an unchecked one, which is worse. */
+int prim_rule_in_domain(int index, u64 a, u64 b)
+{
+    if (index < 0 || index >= (int)RULE_LEN)
+        return 0;
+    u64 limit = rule_slots[index].limit;
+    if (limit == 0)
+        return 0;
+    if (a >= limit || b >= limit)
+        return 0;                          /* the battery never looked past here */
+    switch (rule_slots[index].shape) {
+    case RULE_SHAPE_SUM:
+        return a < limit - b;              /* a + b < limit, without the sum */
+    case RULE_SHAPE_PRODUCT:
+        if (a == 0 || b == 0)
+            return 1;                      /* 0 is under any limit */
+        return b <= (limit - 1) / a;       /* a * b < limit, without the product */
+    default:
+        return 0;
+    }
 }
 
 int prim_rule_state(int index, noun *def)
@@ -311,7 +350,7 @@ int prim_rule_probe(int index, u64 a, u64 b, u64 *result)
         return 1;
     }
     if (rule_slots[index].limit != 0 && rule_slots[index].def != 0
-        && a + b < rule_slots[index].limit) {
+        && prim_rule_in_domain(index, a, b)) {
         rule_active = index;
         noun subject = noun_cons(noun_atom(a),
                                  noun_cons(noun_atom(b), noun_atom(0)));
