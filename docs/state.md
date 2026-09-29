@@ -100,7 +100,7 @@ checklist says it on every boot.
 The first rule is `+add`, because that is the one definition the machine already
 carries (item 23). Its certified domain is the triangle `a + b < 64` -- 2080
 pairs, the largest triangle whose exhaustive battery still settles in the arena
--- and the battery settles near 2.4 million cells, which fits the guest arena
+-- and the battery settles at 1,926,080 cells, which fits the guest arena
 and is far over the host's. This is a check a bare-metal machine can perform and
 its own workstation cannot: the attempt ran out of arena at `+add(2, 58)`, so
 `make rules-test`, like everything else, is the machine testing itself.
@@ -226,7 +226,7 @@ the domain that is nowhere near it.
 
 **A domain the machine cannot map is a promise with no pages behind it.** The
 whole of Step 7's guest-side measurement was blocked for a while by a Step 1
-bug that eleven steps of writing had not found, and it is the one worth
+bug that six steps of writing had not found, and it is the one worth
 remembering. The kernel's initial page tables identity-mapped only the low 64
 MiB, from when that was all the machine asked for, while `mem_init` trusted the
 boot loader's memory map for the heap and `mem_alloc` handed pointers out of it.
@@ -270,7 +270,7 @@ The count is 139 rather than 140 because one test was deleted rather than fixed
 — see bug 3 below. It asserted both sides of a contradiction, so there was
 nothing there to repair.
 
-### A bug in Step 1 that eleven steps of writing did not find
+### A bug in Step 1 that six steps of writing did not find
 
 Found by going back over Step 1 to look for problems rather than to add
 anything, and worth setting down because of what it says about the rest.
@@ -471,7 +471,7 @@ from the pushed shape too — see item 22, where the shift that "should" be
    A 39-character formula costs 38 new cells and rewrites nothing. The cost of
    immutability here is that items have to be held until their order is known.
 4. **How much fits?** The arena is half the heap at 16 bytes a cell, and the
-   machine now says so: 8,316,544 cells with QEMU's 256MB, 406 used by the
+   machine now says so: 8,316,544 cells with QEMU's 256MB, 3,353,942 used by the
    self-test -- and since item 29 every one of those is a cell the identity map
    has a page for, which the number did not used to mean. A line costs about 3
    cells at one character and about 4100 at a

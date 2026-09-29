@@ -1100,7 +1100,8 @@ primitives by index, as its jets do). The machine:
    that failed: the definition stopped (with the interpreter's reason), it
    answered a cell, the native itself stopped, or it answered a different atom
    from the native's, each reported as `+add(a, b)`. The battery is about 2080
-   pairs for the domain and settles near 2.4 million cells, which is under the
+   pairs for the domain and settles at 1,926,080 cells on the guest, which is
+   under the
    guest's arena and far over the host's, so this is a check the machine can
    perform and the host could not.
 4. Only then installs it, and says what is now true: the primitive, the domain,

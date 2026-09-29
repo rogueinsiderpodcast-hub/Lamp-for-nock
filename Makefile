@@ -484,6 +484,18 @@ rules-test: $(KERNEL)
 	    echo "make rules-test: FAILED -- a definition that lies about +mul was not refused by name"; \
 	    cat $(BUILD)/rules7.log; exit 1; \
 	fi; \
+	printf '%s\n!\n\004' "$$(cat $(RULES_J2))" \
+	  | $(QEMU) -kernel $(KERNEL) \
+	  > $(BUILD)/rules8.log 2>&1; \
+	wait; \
+	if ! grep -q 'yes\.  +mul is now a rule, sent as text and checked in full: 892 pairs' $(BUILD)/rules8.log; then \
+	    echo "make rules-test: FAILED -- a +mul record was not re-verified on the next boot"; \
+	    cat $(BUILD)/rules8.log; exit 1; \
+	fi; \
+	if ! grep -q 'domain a \* b < 128 with a and b each under 128\.  the C native answers' $(BUILD)/rules8.log; then \
+	    echo "make rules-test: FAILED -- the replayed +mul removal did not stay away (last word loses)"; \
+	    cat $(BUILD)/rules8.log; exit 1; \
+	fi; \
 	echo "make rules-test: a rule is text, checked in full, re-verified out of the notebook, and put away by the same record shape"
 
 debug: $(KERNEL)
