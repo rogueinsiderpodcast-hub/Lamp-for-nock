@@ -40,7 +40,7 @@ replacing the host.
 **Booting, and deliberately not one of the steps above.** The endgame note just
 up had no shape, and this is the shape: a fake ship and a comet on a pinned
 Alpine kernel with three NIC modules, four pinned third-party packages, a
-332-line init, and root filesystems written by hand. `make urbit` boots the fake
+344-line init, and root filesystems written by hand. `make urbit` boots the fake
 ship, `make comet` boots a real comet that mines and syncs, the dojo lands on
 the serial console, and `Ctrl-A X` quits. `docs/decisions.md` item 33 is the
 design; the short version is that Lamp's machine has no syscall layer, so

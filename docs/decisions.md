@@ -1542,7 +1542,7 @@ the two `say()` calls in the init get out at all.
 
 ### The init, and the four things it has to do that are not obvious
 
-`urbit/urbit-init.c` is 332 lines by the method in `tools/lines.awk`. It mounts
+`urbit/urbit-init.c` is 344 lines by the method in `tools/lines.awk`. It mounts
 `proc`, `sysfs`, `devtmpfs` and `tmpfs`, loads the three NIC modules with
 `init_module(2)` (there is no kmod), points `eth0` at slirp's network, adds a
 default route and slirp's resolver, and execs vere. Four of those steps are
@@ -1579,6 +1579,19 @@ on it; the console it *writes* to is a real tty, and the dojo's line editing
 does not need one. A comet gets nothing typed into it: it has no desk until it
 has mined one, and a command typed at the wrong moment costs more than one never
 typed.
+
+**A comet's stdin is not a pipe, because under `-t` the dojo never reads stdin
+at all.** That matters once the web login on the comet's own port asks for the
+ship's access key, which is only printed by the dojo's `+code`. With the old
+model — `-t` and a `+code` line down the pipe — the line sat in the pipe
+forever and no prompt ever appeared; the dojo is simply not listening. vere 4.6
+only reads commands when stdin is a real terminal, and refuses to start with
+"unable to initialize terminal (not a tty)" when it is not. So the comet branch
+keeps the serial console as stdin and drops `-t`: the guest behaves the way a
+host does, the `~<name>:dojo>` prompt prints on the serial, and `+code` typed
+from the host in answer to it prints the four-syllable key the login form's own
+`pattern` demands. The pipe and its relay remain exactly what the fake ship
+needs them to be.
 
 **The default route needs `RTF_GATEWAY`, and the absence of it looks exactly
 like no network.** The first version of this set only `RTF_UP`; the kernel then

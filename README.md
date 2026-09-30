@@ -250,7 +250,7 @@ docs/state.md      where this stands, and what is still open
 
 # the other half: a real Urbit, beside this machine and not inside it
 urbit/urbit.lock   every third-party byte pinned, with a sha256 and a size
-urbit/urbit-init.c  a 332-line PID 1: modules, addresses, route, resolv, exec vere
+urbit/urbit-init.c  a 344-line PID 1: modules, addresses, route, resolv, exec vere
 urbit/mkinitramfs.py  the root filesystems, written without privileges
 ```
 

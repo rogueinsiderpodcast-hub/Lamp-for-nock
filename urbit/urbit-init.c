@@ -19,6 +19,12 @@
  *                                      a star and syncs, which needs a network,
  *                                      and therefore is not reproducible
  *
+ * A comet's console is the serial line: vere keeps a real tty for stdin and
+ * stdout, because the dojo has to print its access key (the +code the web
+ * login asks for) somewhere a person can read it.  The key is typed at that
+ * console from the host once the dojo prompt shows, so nothing is relayed
+ * down a pipe for a comet the way boot commands are for a fake ship.
+ *
  * Everything is pinned and checked.  The kernel, its modules and vere are
  * fetched against recorded sha256s in this file's sibling urbit.lock, because a
  * root filesystem nobody checked is a root filesystem nobody can reason about. */
@@ -299,7 +305,9 @@ static void write_resolv(void)
 int main(void)
 {
     pid_t child;
+#if !URBIT_COMET
     int pipefd[2];
+#endif
     int status;
 
     /* /proc and /sys first: the overcommit sysctl below lives in /proc.
@@ -365,45 +373,53 @@ int main(void)
         say("urbit-init: no default route, so nothing can be dialled out to\n");
     write_resolv();
 
-    /* The dojo reads its commands from stdin, and stdin has to be a pipe
-     * because two of them are typed in here rather than by somebody who would
-     * have to know them: |mount %base installs the desk and |join %base opens
-     * the dojo on it.  A pipe means the dojo would read nobody's typing, so
-     * this program becomes a relay -- boot commands down the pipe first, then
-     * every line the console produces after that.  Ordering is the pipe's, so
-     * the two boot commands are always consumed before any typing, with no
-     * race and no sleep. */
+    /* A fake ship's dojo reads its commands from stdin, and stdin has to be a
+     * pipe because two of them are typed in here rather than by somebody who
+     * would have to know them: |mount %base installs the desk and |join %base
+     * opens the dojo on it.  A pipe means the dojo would read nobody's typing,
+     * so this program becomes a relay -- boot commands down the pipe first,
+     * then every line the console produces after that.  Ordering is the
+     * pipe's, so the two boot commands are always consumed before any typing,
+     * with no race and no sleep.  A comet does none of this: it keeps the
+     * serial console as a real tty (vere 4.6 will not read commands given to
+     * it any other way), and its +code is typed at the console from the host
+     * after the dojo prompt appears. */
+#if !URBIT_COMET
     if (pipe(pipefd) != 0) {
         say("urbit-init: pipe: %s\n", strerror(errno));
         return 1;
     }
+#endif
     child = fork();
     if (child < 0) {
         say("urbit-init: fork: %s\n", strerror(errno));
         return 1;
     }
     if (child == 0) {
-        /* The child becomes vere.  It keeps the serial console for output and
-         * reads its commands down the pipe, so the console stays a terminal
-         * afterwards instead of being consumed by this program. */
+        /* The child becomes vere.  A fake ship keeps the serial console for
+         * output and reads its commands down the pipe, so the console stays a
+         * terminal afterwards instead of being consumed by this program. */
+#if !URBIT_COMET
         dup2(pipefd[0], STDIN_FILENO);
         close(pipefd[0]);
         close(pipefd[1]);
+#endif
 #if URBIT_COMET
         /* A comet: no -F, no -B, no ship name.  "vere -c <pier>" is the whole
          * of it -- with no key and no pill, vere goes looking for a star, asks
          * to be sponsored, and syncs from whatever it is given.  That is a
          * real ship on the real network, which is the entire difference
          * between this and a fake ship, and it is why this mode needs a
-         * network, a name server and hours of CPU that a fake ship does not. */
+         * network, a name server and hours of CPU that a fake ship does not.
+         *
+         * Its stdin is the serial console itself, a real tty, and there is no
+         * -t: vere must believe it is interactive, or the dojo will never read
+         * the +code that is typed at it from the host.  There is nothing to
+         * relay, so the parent below only waits. */
         execl(VERE_PATH, VERE_PATH,
               "-c", COMET_PIER_PATH,
               "--loom", LOOM_EXPONENT,
               "--http-port", "8080",
-              /* stdin is this program's pipe, so vere is right to refuse to
-               * set up a terminal on it.  The console it writes to is a real
-               * tty, and the dojo's line editing does not need one. */
-              "-t",
 #if URBIT_VERBOSE
               "-v",
 #endif
@@ -428,8 +444,8 @@ int main(void)
         _exit(127);
     }
 
+    #if !URBIT_COMET
     close(pipefd[0]);
-#if !URBIT_COMET
     {
         /* |mount %base installs the desk, |join %base opens the dojo on it. */
         static const char boot[] =
@@ -439,27 +455,28 @@ int main(void)
         if (n != (ssize_t)sizeof boot - 1)
             say("urbit-init: short write to the dojo: %s\n", strerror(errno));
     }
-#else
-    /* A comet gets nothing typed into it.  |mount %base is a thing you do to a
-     * desk that exists, and a comet that has just finished mining has none yet
-     * -- and a command typed at the wrong moment costs more than a command
-     * never typed.  The dojo is on the console for whoever is watching. */
-#endif
     /* Deliberately not closed: the dojo is still reading it. */
+#endif
     fflush(NULL);
 
     say("urbit-init: vere is pid %d, first boot installs the kernel and "
         "takes a few minutes\n", (int)child);
+#if URBIT_COMET
+    say("urbit-init: the dojo is on this console; when it shows its prompt, "
+        "type +code on the host and send it (Ctrl-A X quits)\n");
+#else
     say("urbit-init: the dojo is on this console; type Hoon at it, or "
         "Ctrl-A X to quit\n");
+#endif
     fflush(NULL);
 
-    /* Everything typed at the console from here on is the dojo's.  The console
-     * is opened once, for reading: this is the serial line, and it is the only
-     * input there is.  Line discipline is left alone on purpose -- in canonical
-     * mode a line arrives when Enter is pressed, which is exactly the unit the
-     * dojo wants, and the tty echoes the typing back to the same serial line a
-     * person is watching. */
+#if !URBIT_COMET
+    /* Everything typed at the console from here on is the dojo's.  The
+     * console is opened once, for reading: this is the serial line, and it is
+     * the only input there is.  Line discipline is left alone on purpose -- in
+     * canonical mode a line arrives when Enter is pressed, which is exactly
+     * the unit the dojo wants, and the tty echoes the typing back to the same
+     * serial line a person is watching. */
     {
         int console = open("/dev/console", O_RDONLY);
         if (console < 0) {
@@ -475,7 +492,8 @@ int main(void)
                     break;
                 }
                 while (off < n) {
-                    ssize_t w = write(pipefd[1], line + off, (size_t)(n - off));
+                    ssize_t w = write(pipefd[1], line + off,
+                                      (size_t)(n - off));
                     if (w <= 0) {
                         if (w < 0 && errno == EINTR)
                             continue;
@@ -489,6 +507,7 @@ int main(void)
         }
     }
     close(pipefd[1]);
+#endif
 
     /* PID 1's job is to keep the machine alive and reap orphans, and a ship
      * that exits should take the machine down with it rather than leave a
