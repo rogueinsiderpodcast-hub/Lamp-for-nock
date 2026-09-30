@@ -6,3 +6,8 @@ build/
 # machine, and it belongs to whoever is using it rather than to the repository.
 # `make notebook-forget` deletes it; this only keeps git from offering to.
 session.log
+# The URBIT_DIAG debugger is deliberately not shipped: it proved "/urbit/vere" is
+# not the problem, the fix for what it found is in the init's -c handling now,
+# and it stays in this tree for the next silent comet.  Restore it with
+# `git apply urbit/urbit-diag.patch`.
+urbit/urbit-diag.patch

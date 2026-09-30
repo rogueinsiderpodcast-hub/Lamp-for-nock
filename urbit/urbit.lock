@@ -1,0 +1,91 @@
+# Every third-party byte Lamp's Urbit VM is built from, pinned.
+#
+# Two files, both fetched over HTTPS, both checked against a sha256 recorded
+# here before they are allowed anywhere near an initramfs.  Nothing else is
+# downloaded and nothing else is inherited: the root filesystem is built by
+# urbit/mkinitramfs.py from urbit/urbit-init.c and these two files.
+#
+# `make urbit-update` moves both pins and rewrites this file; it is the only
+# thing here that is meant to change.
+
+# --- the runtime: a real Urbit, as a single static binary -------------------
+#
+# urbit/vere, which is the Arvo VM's runtime.  It is statically linked, which
+# is the whole reason a bare initramfs is enough: no glibc, no musl, no
+# interpreter, nothing to install.  24 MB, and the Arvo kernel arrives over the
+# air from the pill rather than being linked in.
+#
+# TWO hashes, because there are two files and they are not the same file.  The
+# release ships a gzipped tarball; what goes into the initramfs is the binary
+# inside it.  The first fetch compared the tarball's hash against the binary's
+# and failed on a correct download, which is the pin working and the recipe
+# being wrong at the same time.  So: the tarball is checked on the way in, the
+# binary is checked after it is unpacked, and the binary's hash is the one that
+# has to hold because the binary is the thing that runs.
+VERE_VERSION   := vere-v4.6
+VERE_URL       := https://github.com/urbit/vere/releases/download/vere-v4.6/linux-x86_64.tgz
+VERE_TGZ_SHA256 := f332e96d66cb767f847fbf15e04b4f953fd078e610b449fbbc26629ea312a3ae
+VERE_TGZ_BYTES  := 9729797
+VERE_FILE      := vere-v4.6-linux-x86_64
+VERE_SHA256    := 47ad302e8934271dfc00dcdab1d553c6d6460b105e3099ff47e0e4e4231bb26d
+VERE_BYTES     := 24044936
+
+# --- the pill: Arvo itself, and the largest thing here by far ---------------
+#
+# The Arvo kernel, which is what a fake ship is.  It is not linked into vere and
+# it is not in the initramfs of any distribution: it is a jam file that gets
+# delivered to the ship and replayed into it, which is why a ship can be created
+# from one and why "boot" means minutes of event replay rather than a kernel
+# loading.
+#
+# It is pinned and baked in here rather than downloaded by the guest, because a
+# machine that cannot be asked what it got is not a machine whose pier can be
+# reasoned about: 217 MB arrives over a link that has already been checked
+# against a sha256, and the guest is handed a file it does not fetch.  A comet
+# does have a network and does fetch its own pill from the star -- that is what
+# mining a comet *is* -- but a comet is not this file's business, and a fake
+# ship that silently downloaded its Arvo would make "which Arvo is this?"
+# unanswerable.  The guest RAM has to hold it either way.
+PILL_URL    := https://bootstrap.urbit.org/urbit-v4.6.pill
+PILL_FILE   := urbit-v4.6.pill
+PILL_SHA256 := f8b08c53dd6d0aa9c4f7654f0a7bcd11e94089222888a3c99c0a10eedcbb377b
+PILL_BYTES  := 217421172
+
+# --- the kernel: the one thing that cannot be built from here ---------------
+#
+# vere is a Linux userspace program, so it needs a Linux kernel, and there is
+# no way around having one.  Lamp's own boot is PVH and freestanding (see
+# boot/boot.S) and has no syscall layer at all, so a userland binary cannot run
+# on it -- this kernel is a dependency, not a preference.
+#
+# This started as Alpine's netboot vmlinuz-virt, which is a bzImage with no
+# modules and no modloop, and that was fine for a fake ship: no network means
+# nothing to fetch, and the pill is baked in anyway.  It stopped being fine the
+# moment a comet had to reach a star, because a kernel with no NIC driver has no
+# eth0 at all -- not an unconfigured one, not a down one, no eth0.  Probing
+# e1000, virtio-net, rtl8139, ne2k_pci and pcnet against it produced lo and
+# nothing else, every time.
+#
+# So the pin is now the linux-virt *package* rather than the netboot image, for
+# one reason: it carries the kernel and the modules that match it in the same
+# 44 MB, and they cannot disagree.  Matching a module to a kernel by hand is a
+# vermagic guess, and this host is a bad place to guess -- latest-stable had
+# already moved from 6.18.52 to 6.18.54 by the time this was written, so the
+# only modules on offer were for a kernel the pin did not name.
+#
+# Four files are taken out of it: the bzImage, and the three modules that get
+# virtio_net to bind.  The dependency order is not a guess either, it is what
+# the package's own modules.dep says: virtio_net wants net_failover wants
+# failover.  The package's sha256 covers all four, and the bzImage is hashed
+# again on its own because that is the one that actually boots.
+#
+# The URL is a versioned directory and not latest-stable, which is the whole
+# lesson of the kernel pin having been a moving target this whole time.
+KERNEL_URL     := https://dl-cdn.alpinelinux.org/alpine/v3.23/main/x86_64/linux-virt-6.18.54-r0.apk
+KERNEL_APK_SHA256 := 5497e55c2c1fc77b41ad3e1703153a10d8293868003e146d32ab559c4cf9d00f
+KERNEL_APK_BYTES  := 42100309
+KERNEL_FILE    := vmlinuz-virt
+KERNEL_SHA256  := 3c3575a3c431e87f6cf533e6201d2085de4bc5928eb46a36a8a4c03dcbace87e
+KERNEL_BYTES   := 12633088
+# The driver chain, in the order the package says to load it.
+KERNEL_MODULES := failover.ko net_failover.ko virtio_net.ko

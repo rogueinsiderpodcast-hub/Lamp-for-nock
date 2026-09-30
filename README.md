@@ -71,6 +71,37 @@ make lines  # count the machine's lines, the way this README counts them
 make clean
 ```
 
+A second, separate group boots a real Urbit beside this one, and is
+deliberately not part of the machine: nothing in `urbit/` goes into
+`build/boot.elf` and `make check` does not depend on any of it.
+
+```
+make urbit  # a fake ship on the serial console, dojo on http://localhost:8080/
+make comet  # a real comet, mining against a star, same console and dojo
+make urbit-fetch  # fetch vere, the pill and the kernel, each against its sha256
+make urbit-rootfs  # the fake ship's root filesystem, written without privileges
+make comet-rootfs  # the comet's: no pill, so it must fetch its own
+make urbit-checksums  # what the lock says, as sha256sum output
+make urbit-update  # what a newer release looks like, changing nothing
+make urbit-check-new URBIT_VERE=vere-v4.7  # boot a release the lock does not name
+make urbit-repin VERE_VERSION=... VERE_FILE=... VERE_SHA256=... VERE_BYTES=... \
+                 VERE_TGZ_SHA256=... VERE_TGZ_BYTES=...
+make urbit-clean
+```
+
+`make urbit` needs `qemu-system-x86_64` and about 250 MB of downloads. It boots
+a fake ship — a complete Urbit with no Azimuth identity, no key file and no
+network, because ames is off — on a pinned Alpine kernel plus the three NIC
+modules it loads, and a first boot installs the Arvo kernel by replaying tens of
+thousands of events, which is minutes rather than seconds. It boots correctly
+only with enough RAM for the pill parse; 3072 MiB of guest RAM is not enough and
+the default is 5120 (`URBIT_MEM=3072 make urbit` has a documented reason to fail,
+not a bug). `make comet` is the same machine booting a real anonymous ship that
+finds a star and syncs — hours of CPU with no KVM, on the public network,
+deliberately. Neither is in `make check` and nothing in this repository will
+notice if a boot stops working. `docs/decisions.md` item 33 is the design and
+`docs/state.md` says why it exists.
+
 `make test` is the interesting one. The machine runs its own test suite on
 boot, prints a pass or fail line for every check, and exits QEMU with a status
 the Makefile turns into a build failure. There is no host-side test harness
@@ -210,12 +241,17 @@ kernel/main.c      facts, self-test, checklist, halt
 tests/harness.c    the counters and expectations both suites share
 tests/nock-tests.c the Nock suite, with every expected value derived by hand
 tests/guestbook-tests.c  the reader and the book
-tools/hoon.c       the host compiler, and its 40 checks
+tools/hoon.c       the host compiler, and its 74 checks
 tools/jet-proofs.c the natives against their Nock definitions
 tools/host-machine.c  the machine's serial and heap, stood up on the host
 tools/lines.awk    the line count this README carries
 docs/decisions.md  every decision, why, and whether it is proven
 docs/state.md      where this stands, and what is still open
+
+# the other half: a real Urbit, beside this machine and not inside it
+urbit/urbit.lock   every third-party byte pinned, with a sha256 and a size
+urbit/urbit-init.c  a 332-line PID 1: modules, addresses, route, resolv, exec vere
+urbit/mkinitramfs.py  the root filesystems, written without privileges
 ```
 
 ## What is verified, and what is not

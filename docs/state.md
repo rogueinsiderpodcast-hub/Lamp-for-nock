@@ -35,6 +35,39 @@ Note for later: `vere`/Arvo is a userspace process, not a kernel. The realistic
 endgame is Lamp as a scaffold *around* a real Urbit on the host, not Urbit
 replacing the host.
 
+## Where the Urbit half stands
+
+**Booting, and deliberately not one of the steps above.** The endgame note just
+up had no shape, and this is the shape: a fake ship and a comet on a pinned
+Alpine kernel with three NIC modules, four pinned third-party packages, a
+332-line init, and root filesystems written by hand. `make urbit` boots the fake
+ship, `make comet` boots a real comet that mines and syncs, the dojo lands on
+the serial console, and `Ctrl-A X` quits. `docs/decisions.md` item 33 is the
+design; the short version is that Lamp's machine has no syscall layer, so
+`vere` cannot run on it, and the cheapest honest Linux to put under a comparison
+is one with nothing of Alpine's in it.
+
+It is a separate thing rather than a change to the kernel, and the two are kept
+apart on purpose: nothing in `urbit/` is compiled into `build/boot.elf`, no
+`make check` suite touches it, and the lock is included behind a guard so that
+its being absent cannot stop `make test` from parsing. It is also a real
+contradiction with the kill list at the bottom of this file — it has a tmpfs, a
+devtmpfs, a virtio NIC and, in the comet's case, the public network — and the
+resolution is that none of it is inherited by the freestanding machine. That is
+an argument rather than a proof, so item 33 states it outright instead of
+leaving it to be inferred.
+
+**What is not verified, which is most of it.** `make urbit` is a person watching
+a boot, and nothing in this repository will notice if that boot stops working.
+The only thing checked mechanically is that a fetch refuses a checksum that does
+not match. More importantly, nothing here cross-checks Arvo: `kernel/nock.c` is
+still the only Nock in the tree, so a real Arvo and this machine's interpreter
+have never been compared on a single input. The audit further down checked all
+twelve opcodes against the *specification*, not against an implementation — item
+11's gap, unchanged, and now with something to close it against. **That is the
+first thing worth doing next**: take a ship that boots and run both over the same
+inputs.
+
 ## Where Step 4 stands
 
 **Green, and the green part is that a SIGKILL costs at most one line.** The
@@ -485,14 +518,15 @@ from the pushed shape too — see item 22, where the shift that "should" be
 
 ## Where Step 3 stands
 
-**Green, for a language that is ten forms long.** `tools/hoon.c` is 605 lines of
-host C, it links the machine's own `noun.c`, `nock.c`, `primitives.c`,
-`book.c` and `guestbook.c` rather than a copy of them, and it has two suites:
-`make hoontest` is 40 checks on the host, where the formulas are run by the
-machine's own interpreter and the answers come from the machine's own book, and
-`make teach` is the bridge end to end — the host compiles eleven expressions, the
-text goes down the serial line as characters, the guest's reader reads it, the
-guest's interpreter runs it, and the answers come back.
+**Green, for a language that is thirteen forms long.** `tools/hoon.c` is 951
+lines of host C by the method in `tools/lines.awk` (1,704 before comments and
+blank lines are stripped), it links the machine's own `noun.c`, `nock.c`,
+`primitives.c`, `book.c` and `guestbook.c` rather than a copy of them, and it has
+two suites: `make hoontest` is 74 checks on the host, where the formulas are run
+by the machine's own interpreter and the answers come from the machine's own
+book, and `make teach` is the bridge end to end — the host compiles eleven
+expressions, the text goes down the serial line as characters, the guest's reader
+reads it, the guest's interpreter runs it, and the answers come back.
 
 ```
 > [8 [[0 [14 0]] [[6 [[0 [2 0]] [[1 [1 0]] [[1 [2 0]] 0]]]] 0]]]

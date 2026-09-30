@@ -1463,3 +1463,227 @@ reason by name. The test builds two independent towers of `NOCK_MAX_DEPTH +
 100-deep pair still compares equal -- the guard is a limit, not a change of mind.
 Removing the guard triple faults the guest mid-test, which is the only proof
 that matters.
+
+---
+
+## 33. A real Urbit boots beside Lamp, and Lamp's own machine is not involved
+
+Everything else in this file is about one machine: a freestanding Nock
+interpreter that owns a serial port and nothing else. This item is about a
+second thing in the same tree, and it is worth being blunt about why it is here
+at all, because the case for it is a sentence in `state.md` rather than a
+feature anyone asked for: *"the realistic endgame is Lamp as a scaffold around a
+real Urbit on the host, not Urbit replacing the host."*
+
+That endgame has a shape nobody had written down, and the shape is a problem.
+Lamp's machine has no syscall layer — `boot/boot.S` goes to long mode and
+`kernel/serial.c` is the only device — so `vere`, which is an ordinary Linux
+userspace program, cannot run on it at all. Any comparison between this machine's
+Nock and a real Arvo needs a Linux underneath, and the question this item settles
+is which one. The answer is a pinned Alpine kernel with nothing of Alpine's in
+it: no alpine initramfs, no modloop, no distribution, no package manager, no
+shell.
+
+### What is pinned, and what the pin is for
+
+Three third-party packages, in `urbit/urbit.lock`, each with a sha256 and a
+byte count:
+
+- **`vere` 4.6**, statically linked. Statically linked is the whole reason a
+  bare initramfs is sufficient — no glibc, no musl, nothing to install.
+- **the Arvo pill, 217 MB.** This is the largest thing here by an order of
+  magnitude and it is baked into the image rather than downloaded by the guest,
+  because a machine that cannot be asked what it got is not a machine whose pier
+  can be reasoned about. The guest is handed a file it does not fetch, on a link
+  that has already been checked against a sha256.
+- **Alpine `linux-virt-6.18.54`** (the package, 42 MB), which yields the
+  12.6 MB `vmlinuz-virt` and the three modules that make a NIC exist at all.
+  This is a dependency, not a preference: it cannot be built from here.
+
+Two of the three pins used to be one pin with a different shape, and the change
+matters. The kernel was originally Alpine's *netboot* `vmlinuz-virt`, a bzImage
+with no modules and no modloop, and that was fine for a fake ship with nothing
+to fetch. It stopped being fine the moment this item grew a comet, because a
+kernel with no NIC driver has no `eth0` at all — not an unconfigured one, not a
+down one, no `eth0`. Probing e1000, virtio-net, rtl8139, ne2k_pci and pcnet
+against it produced `lo` and nothing else, every time. The pin is now the
+`linux-virt` *package* rather than the netboot image because it carries the
+kernel and the modules that match it in the same file, and they cannot disagree:
+matching a module to a kernel by hand is a vermagic guess, and the only modules
+available were already for a kernel the pin did not name by the time this was
+written. And the URL is a versioned directory rather than `latest-stable`, which
+is the whole lesson of the kernel pin having been a moving target this entire
+time — the versioned URL is what the checksum can actually be checked against.
+
+The sha256 is a pin rather than a suggestion, and the fetch treats a mismatch
+as a stop rather than a warning: it writes to `.tmp`, checks the hash *and* the
+size, and on any disagreement prints both numbers, installs nothing, and says
+that either the release was re-cut or the download was tampered with. A wrong
+checksum should surface as a failed build rather than surprise somebody twenty
+minutes into a boot. `make urbit-checksums` prints what the lock says as
+`sha256sum` output, so it can be diffed against a fetched file by hand without
+trusting any of the code above it.
+
+The initramfs is written by hand rather than by `cpio(1)`, and the reason is
+narrow and specific: `cpio` can only record a device node that already exists,
+and creating one needs `CAP_MKNOD`. `urbit/mkinitramfs.py` fills the `rdev`
+fields in directly, which means the filesystem builds as an unprivileged user
+and is byte-for-byte reproducible — mtime 0, uid 0, gzip mtime 0. Nothing about
+the archive depends on the machine that built it, which is the property that
+matters for a pinned root.
+
+The image holds `/init`, one static binary, and, for a fake ship, the pill. A
+comet's image is different: no pill, because a comet fetches its own from the
+star — that is what mining one *is*. Both images carry the three NIC modules and
+`/etc/resolv.conf` under `/lib/modules`, because the network a comet needs does
+not exist unless they are there. The two hand-written device nodes are there as
+a fallback for a kernel without `CONFIG_DEVTMPFS`, because `/dev/console` is how
+the two `say()` calls in the init get out at all.
+
+### The init, and the four things it has to do that are not obvious
+
+`urbit/urbit-init.c` is 332 lines by the method in `tools/lines.awk`. It mounts
+`proc`, `sysfs`, `devtmpfs` and `tmpfs`, loads the three NIC modules with
+`init_module(2)` (there is no kmod), points `eth0` at slirp's network, adds a
+default route and slirp's resolver, and execs vere. Four of those steps are
+load-bearing in a way worth writing down:
+
+**`overcommit_memory` is set to 1, and this is the cloud host's setting, not the
+conservative one.** `vere` reserves its entire loom as a single mapping before
+allocating any of it, and the default overcommit policy answers that request by
+asking how much memory is free right now. On a machine with other things running
+— which is every machine a person uses this on — the honest answer is "not that
+much", and vere stops with `boot: mapping 2048MB failed` and advice about swap.
+There is no swap to add, because the whole root filesystem is an initramfs and is
+gone on reboot by construction. The reservation is not an allocation, and the
+thing that would actually be hurt by a broken promise here is a kernel with an
+OOM killer and nothing to lose.
+
+**HOW MUCH RAM, in one sentence: 3072 is not enough, 5120 is.** The loom is a
+protected reservation of 2 GiB, so a 3 GiB guest has about 1 GiB left to parse a
+217 MB pill into a ship, and it does not: the replay finishes, then
+`boot: parsing %brass pill` is followed by `king: boot failed` and nothing else,
+every time, at 2 GiB and 3 GiB guest RAM and at loom 30. At 5 GiB the same image
+gets all the way to installing the compiler and the vanes and opening the dojo.
+That was the single most expensive hour of this item.
+
+**vere's stdin is a pipe, and the init becomes a relay.** The dojo reads its
+commands from stdin, and for the fake ship two of them have to be typed in rather
+than by a person who would have to know them: `|mount %base` installs the desk
+and `|join %base` opens the dojo on it. A pipe means the dojo reads nobody's
+typing, so the init writes those two commands down the pipe and then forwards
+every line the serial console produces. Ordering is the pipe's, so the boot
+commands are always consumed before any typing, with no race and no sleep. `-t`
+is passed to vere because stdin is a pipe and it is right to refuse a terminal
+on it; the console it *writes* to is a real tty, and the dojo's line editing
+does not need one. A comet gets nothing typed into it: it has no desk until it
+has mined one, and a command typed at the wrong moment costs more than one never
+typed.
+
+**The default route needs `RTF_GATEWAY`, and the absence of it looks exactly
+like no network.** The first version of this set only `RTF_UP`; the kernel then
+ignores `rt_gateway` entirely, refuses the route with `ENETUNREACH`, and the
+guest reports "Network is unreachable" while the network is, in fact, fine at
+every layer above that one missing flag. The flag is now written down in the
+code with this paragraph's title as the comment.
+
+The ship is fake (`-F zod`) because it is the only complete Urbit that needs
+nothing arranged first: no Azimuth identity, no key file, no sponsoring, and
+ames disabled so nothing has to be reachable. A fake ship is exactly the shape of
+thing Lamp can be pointed at. A comet (`make comet`, `-c` and nothing else) is
+the other end of the same item: a real anonymous ship that finds a star, asks to
+be sponsored and syncs, which needs a network, a name server and hours of CPU
+that a fake ship needs none of. The two are separate images rather than flags,
+so the wrong one cannot be booted by a typo.
+
+The comet's pier is `-c /urbit/ship`, and the `/urbit` half is load-bearing.
+vere 4.6 resolves its pier argument by realpath()ing the *parent* directory and
+creating only the leaf, so the parent must already exist. A root-level path
+(`/pier`) has an empty parent, realpath("") is ENOENT, and the binary's answer
+to that NULL is `strdup(1)` and a SIGSEGV before it has printed a prompt — a
+comet that reads as "never started". An existing leaf is refused the other way,
+so the init creates nothing: `/urbit` is guaranteed by the image, `ship` is
+not, and vere makes the pier itself.
+
+### The lock cannot take the freestanding machine down with it
+
+`urbit/urbit.lock` is included with `wildcard` and a guard, rather than with a
+plain `include`, and the direction of that choice is the whole point. A hard
+`include` makes the *entire Makefile* fail to parse when the lock is absent —
+including `make test` and `make check`, which need nothing from this section and
+are the guarantee the other 32 items rest on. A file missing from one corner of
+the tree should not be able to take the machine down. So the pins are left empty,
+the file targets are given no prerequisites they could ever satisfy, and every
+entry point refuses by name instead: the same instinct as item 26, applied to the
+build rather than to the machine.
+
+### Repinning is deliberately not automatic
+
+A checksum that changed under you is a new binary with new behaviour, and this
+project's rule is that a new number is written down with the reason before it is
+believed. `make urbit-update` therefore prints what a new release looks like and
+changes nothing. It ends by naming two targets that have to exist for the
+sentence to be a step rather than a gesture:
+
+- `make urbit-check-new URBIT_VERE=vere-v4.7` fetches a release the lock does
+  not name, prints its sha256 and size *before* booting, and boots it against
+  the pinned pill and the pinned kernel. It is deliberately not checked against
+  the lock, because writing a pin down before a person has watched the binary
+  boot is the thing this section exists to avoid. Only the runtime is new, so the
+  question being asked is a question about one binary.
+- `make urbit-repin` rewrites the lock and nothing else. It takes all six
+  numbers or none of them (vere is shipped as a tarball and unpacked, so there
+  are two layers to pin: the binary's sha256 and size, and the `.tgz` it is
+  delivered in, named `VERE_*` and `VERE_TGZ_*`), refuses a sha256 that is not
+  64 hex characters, and — if the binary is still sitting in `build/urbit-new`
+  from a check — verifies the given hash against the file before writing
+  anything, so a number copied from the wrong line fails there rather than at
+  the next fetch. It prints the diff it made. A re-pin that silently did nothing
+  is exactly the failure item 31 is about, and one target editing a checked-in
+  file is the one place in the tree where that failure could recur.
+
+The pill and the kernel keep their own pins through all of this. A new runtime
+is not a reason to re-download a 42 MB kernel package.
+
+### What is not verified, said plainly
+
+This is the half that matters, and it is a short list because the feature is
+narrow.
+
+1. **None of it is in `make check`.** Five suites run on every build and not one
+   of them touches `urbit/`. The only thing checked mechanically is that the
+   fetch refuses a checksum that does not match. `make urbit` is a person
+   watching a boot, and nothing in this repository will notice if that boot
+   stops working.
+2. **Nothing here cross-checks Arvo, and item 11 applies with the force turned
+   up rather than down.** `kernel/nock.c` is still the only Nock in the tree. A
+   real Arvo and this machine's interpreter have never been compared on a single
+   input, and the audit in `state.md` that checked all twelve opcodes against
+   `vere/doc/spec/nock/4.txt` checked a *specification*, not an implementation.
+   The gap between "this machine implements Nock 4K" and "a real Urbit agrees
+   with this machine" is exactly the gap item 11 names, and it is still open.
+   This is the first thing worth doing with a ship that boots.
+3. **The boot itself is untested and slow.** A first boot is tens of thousands of
+   events of pill replay on a machine with no KVM — minutes, not seconds. When
+   one fails, `URBIT_VERBOSE=1` passes `vere -v` and makes it say where, and that
+   is the entire diagnostic story. There is no expected-output file for it.
+4. **The loom exponent is a memory knob and a correctness knob at once.** 31 is
+   2 GiB and is what the 4.x loom wants; `URBIT_LOOM=30` is 1 GiB and a smaller
+   address space. A ship that will not boot at a lower exponent has not been
+   characterised, only discovered.
+
+### And the tension this item does not resolve
+
+`state.md` keeps a kill list, and it has *filesystems* and *networking* on it.
+This item has a tmpfs, a devtmpfs, an initramfs, a NIC loaded from three modules
+and — for a comet — the public network it dials out on. That is a real
+contradiction, and it is deliberate, and the reason it does not undermine the
+other 32 items is the sentence this item is built around:
+**none of it is inherited by Lamp's machine.** The kill list is about what the
+freestanding machine may depend on, and `build/boot.elf` contains no part of
+`urbit/` — the two are separate Makefile sections, and `make check` depends on
+neither. But that is an argument, not a proof, and a reader who finds a network
+device and a filesystem in a project with a kill list deserves to be told this
+was a decision rather than left to infer it. So: this is a scaffold to point Lamp
+at, kept deliberately outside the machine, and the day it wants to get inside is
+the day item 3 has to be reopened rather than this one amended.

@@ -104,7 +104,7 @@ PROOFS_SRCS := tools/jet-proofs.c tools/host-machine.c kernel/noun.c \
                kernel/guestbook.c
 PROOFS_OBJS := $(patsubst %.c,$(BUILD)/host/%.o,$(PROOFS_SRCS))
 
-.PHONY: all run test debug clean lines hoontest proofs teach check
+.PHONY: all run test debug clean lines hoontest proofs teach check urbit urbit-fetch urbit-rootfs urbit-update comet comet-rootfs urbit-checksums urbit-check-new urbit-repin urbit-clean
 
 all: $(KERNEL)
 
@@ -533,3 +533,517 @@ clean:
 # of last week's kernel.  That is how NOCK_MAX_DEPTH stayed 10000 in the
 # compiled image after kernel.h said 7000.  decisions.md item 31.
 -include $(OBJS:.o=.d) $(HOON_OBJS:.o=.d) $(PROOFS_OBJS:.o=.d)
+
+# --- a real Urbit, in QEMU, next to this one ---------------------------------
+#
+# Everything above is Lamp: a freestanding Nock machine that boots with no
+# operating system under it.  This section is the other half of the project's
+# stated endgame (docs/state.md, "the realistic endgame is Lamp as a scaffold
+# *around* a real Urbit on the host"), and it is deliberately a separate thing
+# rather than a change to the kernel.  Nothing in urbit/ is compiled into
+# build/boot.elf and `make check` does not depend on any of it, so the freestanding
+# machine keeps its guarantee while a real Urbit sits beside it.
+#
+# The shape is: a pinned Alpine bzImage with its pinned NIC driver modules, a
+# pinned static vere, and a root filesystem holding nothing but those, a pill
+# for the fake ship, and a ~330-line init (urbit/urbit-init.c, counted the way
+# tools/lines.awk counts).  No distribution, no package manager, no shell, no
+# modloop.  decisions.md item 33.
+URBIT_DIR   := $(BUILD)/urbit
+URBIT_LOCK  := urbit/urbit.lock
+# Guest RAM, and 3072 is not enough.  The loom is a protected reservation of
+# 2GiB, so a 3GiB guest has about 1GiB left to parse a 217MB pill into a ship,
+# and it does not: the replay finishes, then "boot: parsing %brass pill" is
+# followed by "king: boot failed" and nothing else, every time, at 2GiB and 3GiB
+# and loom 30.  At 5GiB the same image gets all the way to installing the
+# compiler and vanes and opening the dojo.  Override with URBIT_MEM= if the
+# machine is smaller; nothing else in this section will tell you why it failed.
+URBIT_MEM   ?= 5120
+# The loom exponent, which is also a memory knob: 31 is 2GB and is what the
+# 4.x loom wants, and a lower one lets the ship boot on a smaller machine at the
+# cost of a smaller address space.  URBIT_LOOM=30 make urbit is 1GB.
+URBIT_LOOM  ?= 31
+# URBIT_VERBOSE=1 passes vere -v, which is how a pill replay that fails is
+# made to say where.
+URBIT_VERBOSE ?= 0
+URBIT_PORT  ?= 8080
+URBIT_SMP   ?= 2
+
+# The lock is included conditionally, and this is load-bearing in the direction
+# that is easy to get backwards.  A hard `include` makes the whole Makefile fail
+# to parse when urbit/urbit.lock is absent -- including `make test` and
+# `make check`, which need nothing from this section and are the guarantee the
+# rest of the tree rests on.  A missing file in one corner should not take the
+# freestanding machine down with it.  So the pins are left empty instead, the
+# file targets below are given no prerequisites they could ever satisfy, and
+# every entry point refuses by name: the project's standing answer to a premise
+# it cannot back up (decisions.md item 26).
+URBIT_LOCKED := $(wildcard $(URBIT_LOCK))
+ifeq ($(URBIT_LOCKED),)
+VERE_VERSION :=
+VERE_URL     :=
+VERE_TGZ_SHA256 :=
+VERE_TGZ_BYTES  :=
+VERE_FILE    :=
+VERE_SHA256  :=
+VERE_BYTES   :=
+PILL_URL     :=
+PILL_FILE    :=
+PILL_SHA256  :=
+PILL_BYTES   :=
+KERNEL_URL   :=
+KERNEL_APK_SHA256 :=
+KERNEL_APK_BYTES  :=
+KERNEL_FILE  :=
+KERNEL_SHA256 :=
+KERNEL_BYTES :=
+KERNEL_MODULES :=
+URBIT_PREREQS :=
+URBIT_COMET_PREREQS :=
+URBIT_FETCH_PREREQS :=
+else
+include $(URBIT_LOCK)
+URBIT_PREREQS := $(URBIT_DIR)/initramfs.cpio.gz
+URBIT_COMET_PREREQS := $(URBIT_DIR)/initramfs-comet.cpio.gz
+URBIT_FETCH_PREREQS := $(URBIT_DIR)/.fetched
+# The three driver modules the guest loads, as full paths, for mkinitramfs.py.
+URBIT_MODULE_FILES := $(foreach m,$(KERNEL_MODULES),$(URBIT_DIR)/$(m))
+endif
+
+# Said the same way everywhere, so "no lock" is one sentence rather than four.
+define URBIT_NO_LOCK
+echo "make: urbit/urbit.lock is missing, and every target in this section needs it."; \
+echo "  The freestanding machine does not: 'make test' and 'make check' are"; \
+echo "  unaffected.  Restore the lock from git and try again."; \
+exit 1
+endef
+
+
+# Fetching is separate from building, and both are separate from running: a
+# wrong checksum should stop the build rather than surprise somebody twenty
+# minutes into a boot.
+#
+# vere is a special case and the reason is worth keeping.  The release ships a
+# gzipped tarball and what goes into the initramfs is the binary inside it, so
+# there are two files and two hashes: the tarball is checked on the way in, the
+# binary is checked after it is unpacked.  The first version of this compared
+# the tarball against the binary's hash and refused a perfectly good download --
+# which is the pin doing its job and the recipe being wrong at once, and the
+# only reason it was caught at all is that the sizes were recorded as well.
+$(URBIT_DIR)/.fetched: $(URBIT_LOCK)
+	@mkdir -p $(URBIT_DIR)
+	@echo "make urbit-fetch: vere $(VERE_VERSION) and $(KERNEL_FILE), checked against urbit/urbit.lock"
+	@set -e; \
+	fetch() { \
+	  what=$$1; url=$$2; file=$$3; want=$$4; size=$$5; \
+	  if [ -f $(URBIT_DIR)/$$file ] \
+	     && [ "$$(sha256sum $(URBIT_DIR)/$$file | cut -d' ' -f1)" = "$$want" ]; then \
+	    echo "  $$file: already here and correct"; return 0; \
+	  fi; \
+	  echo "  $$file: fetching"; \
+	  curl -sSfL --retry 3 -o $(URBIT_DIR)/$$file.tmp "$$url"; \
+	  got=$$(sha256sum $(URBIT_DIR)/$$file.tmp | cut -d' ' -f1); \
+	  if [ "$$got" != "$$want" ]; then \
+	    echo "  $$file: FAILED -- sha256 is $$got, not $$want"; \
+	    echo "  Nothing was installed.  A pin that disagrees with the server means"; \
+	    echo "  either the release was re-cut or the download was tampered with."; \
+	    echo "  'make urbit-update' reports what a new release looks like without"; \
+	    echo "  changing anything here."; \
+	    rm -f $(URBIT_DIR)/$$file.tmp; exit 1; \
+	  fi; \
+	  got=$$(stat -c%s $(URBIT_DIR)/$$file.tmp); \
+	  if [ "$$got" != "$$size" ]; then \
+	    echo "  $$file: FAILED -- $$got bytes, not $$size"; \
+	    rm -f $(URBIT_DIR)/$$file.tmp; exit 1; \
+	  fi; \
+	  mv $(URBIT_DIR)/$$file.tmp $(URBIT_DIR)/$$file; \
+	  echo "  $$file: sha256 and size ok"; \
+	}; \
+	fetch_vere() { \
+	  if [ -f $(URBIT_DIR)/$(VERE_FILE) ] \
+	     && [ "$$(sha256sum $(URBIT_DIR)/$(VERE_FILE) | cut -d' ' -f1)" = "$(VERE_SHA256)" ]; then \
+	    echo "  $(VERE_FILE): already here and correct"; return 0; \
+	  fi; \
+	  echo "  $(VERE_FILE): fetching (a tarball, then the binary inside it)"; \
+	  curl -sSfL --retry 3 -o $(URBIT_DIR)/vere.tgz.tmp "$(VERE_URL)"; \
+	  got=$$(sha256sum $(URBIT_DIR)/vere.tgz.tmp | cut -d' ' -f1); \
+	  if [ "$$got" != "$(VERE_TGZ_SHA256)" ]; then \
+	    echo "  vere.tgz: FAILED -- sha256 is $$got, not $(VERE_TGZ_SHA256)"; \
+	    echo "  Nothing was installed."; rm -f $(URBIT_DIR)/vere.tgz.tmp; exit 1; \
+	  fi; \
+	  got=$$(stat -c%s $(URBIT_DIR)/vere.tgz.tmp); \
+	  if [ "$$got" != "$(VERE_TGZ_BYTES)" ]; then \
+	    echo "  vere.tgz: FAILED -- $$got bytes, not $(VERE_TGZ_BYTES)"; \
+	    rm -f $(URBIT_DIR)/vere.tgz.tmp; exit 1; \
+	  fi; \
+	  echo "  vere.tgz: sha256 and size ok"; \
+	  rm -rf $(URBIT_DIR)/vere.tgz.d; mkdir -p $(URBIT_DIR)/vere.tgz.d; \
+	  tar xzf $(URBIT_DIR)/vere.tgz.tmp -C $(URBIT_DIR)/vere.tgz.d; \
+	  got=$$(sha256sum $(URBIT_DIR)/vere.tgz.d/$(VERE_FILE) | cut -d' ' -f1); \
+	  if [ "$$got" != "$(VERE_SHA256)" ]; then \
+	    echo "  $(VERE_FILE): FAILED -- the binary inside the tarball is $$got"; \
+	    echo "  and the pin says $(VERE_SHA256).  Nothing was installed."; \
+	    rm -rf $(URBIT_DIR)/vere.tgz.tmp $(URBIT_DIR)/vere.tgz.d; exit 1; \
+	  fi; \
+	  got=$$(stat -c%s $(URBIT_DIR)/vere.tgz.d/$(VERE_FILE)); \
+	  if [ "$$got" != "$(VERE_BYTES)" ]; then \
+	    echo "  $(VERE_FILE): FAILED -- $$got bytes, not $(VERE_BYTES)"; \
+	    rm -rf $(URBIT_DIR)/vere.tgz.tmp $(URBIT_DIR)/vere.tgz.d; exit 1; \
+	  fi; \
+	  mv $(URBIT_DIR)/vere.tgz.d/$(VERE_FILE) $(URBIT_DIR)/$(VERE_FILE); \
+	  rm -rf $(URBIT_DIR)/vere.tgz.tmp $(URBIT_DIR)/vere.tgz.d; \
+	  echo "  $(VERE_FILE): sha256 and size ok"; \
+	}; \
+	fetch_kernel() { \
+	  if [ -f $(URBIT_DIR)/$(KERNEL_FILE) ] \
+	     && [ "$$(sha256sum $(URBIT_DIR)/$(KERNEL_FILE) | cut -d' ' -f1)" = "$(KERNEL_SHA256)" ] \
+	     && [ -f $(URBIT_DIR)/virtio_net.ko ]; then \
+	    echo "  $(KERNEL_FILE): already here and correct"; return 0; \
+	  fi; \
+	  echo "  linux-virt: fetching the package (kernel and its modules together)"; \
+	  curl -sSfL --retry 3 -o $(URBIT_DIR)/linux-virt.apk.tmp "$(KERNEL_URL)"; \
+	  got=$$(sha256sum $(URBIT_DIR)/linux-virt.apk.tmp | cut -d' ' -f1); \
+	  if [ "$$got" != "$(KERNEL_APK_SHA256)" ]; then \
+	    echo "  linux-virt.apk: FAILED -- sha256 is $$got, not $(KERNEL_APK_SHA256)"; \
+	    echo "  Nothing was installed."; rm -f $(URBIT_DIR)/linux-virt.apk.tmp; exit 1; \
+	  fi; \
+	  got=$$(stat -c%s $(URBIT_DIR)/linux-virt.apk.tmp); \
+	  if [ "$$got" != "$(KERNEL_APK_BYTES)" ]; then \
+	    echo "  linux-virt.apk: FAILED -- $$got bytes, not $(KERNEL_APK_BYTES)"; \
+	    rm -f $(URBIT_DIR)/linux-virt.apk.tmp; exit 1; \
+	  fi; \
+	  echo "  linux-virt.apk: sha256 and size ok"; \
+	  rm -rf $(URBIT_DIR)/kv; mkdir -p $(URBIT_DIR)/kv; \
+	  ( cd $(URBIT_DIR)/kv && tar xzf ../linux-virt.apk.tmp ) 2>/dev/null; \
+	  for m in $(KERNEL_MODULES); do \
+	    src=$$(find $(URBIT_DIR)/kv/lib/modules -name "$$m.gz" -o -name "$$m" 2>/dev/null | head -1); \
+	    if [ -z "$$src" ]; then \
+	      echo "  $$m: FAILED -- not in the package"; \
+	      echo "  Nothing was installed."; rm -rf $(URBIT_DIR)/kv $(URBIT_DIR)/linux-virt.apk.tmp; exit 1; \
+	    fi; \
+	    case "$$src" in *.gz) gunzip -c "$$src" > $(URBIT_DIR)/$$m ;; \
+	                 *) cp "$$src" $(URBIT_DIR)/$$m ;; esac; \
+	  done; \
+	  src=$$(find $(URBIT_DIR)/kv/boot -name 'vmlinuz*' 2>/dev/null | head -1); \
+	  if [ -z "$$src" ]; then \
+	    echo "  $(KERNEL_FILE): FAILED -- the package has no bzImage in boot/"; \
+	    echo "  Nothing was installed."; rm -rf $(URBIT_DIR)/kv $(URBIT_DIR)/linux-virt.apk.tmp; exit 1; \
+	  fi; \
+	  mv "$$src" $(URBIT_DIR)/$(KERNEL_FILE); \
+	  got=$$(sha256sum $(URBIT_DIR)/$(KERNEL_FILE) | cut -d' ' -f1); \
+	  if [ "$$got" != "$(KERNEL_SHA256)" ]; then \
+	    echo "  $(KERNEL_FILE): FAILED -- the bzImage in the package is $$got"; \
+	    echo "  and the pin says $(KERNEL_SHA256).  Nothing was installed."; \
+	    rm -rf $(URBIT_DIR)/kv $(URBIT_DIR)/linux-virt.apk.tmp; exit 1; \
+	  fi; \
+	  got=$$(stat -c%s $(URBIT_DIR)/$(KERNEL_FILE)); \
+	  if [ "$$got" != "$(KERNEL_BYTES)" ]; then \
+	    echo "  $(KERNEL_FILE): FAILED -- $$got bytes, not $(KERNEL_BYTES)"; \
+	    rm -rf $(URBIT_DIR)/kv $(URBIT_DIR)/linux-virt.apk.tmp; exit 1; \
+	  fi; \
+	  echo "  $(KERNEL_FILE): sha256 and size ok"; \
+	  echo "  $(KERNEL_MODULES): extracted, in load order"; \
+	  rm -rf $(URBIT_DIR)/kv $(URBIT_DIR)/linux-virt.apk.tmp; \
+	}; \
+	fetch_vere; \
+	fetch pill   "$(PILL_URL)"   "$(PILL_FILE)"   "$(PILL_SHA256)"   "$(PILL_BYTES)"; \
+	fetch_kernel; \
+	touch $@
+
+# The init is a static binary and the archive is written by hand, because a
+# cpio(1) cannot record a device node that does not already exist and making one
+# needs CAP_MKNOD.  urbit/mkinitramfs.py fills the rdev fields in directly, so
+# the filesystem builds as an unprivileged user and is byte-for-byte
+# reproducible: mtime 0, no uid, no hostname, gzip mtime 0.
+$(URBIT_DIR)/init: urbit/urbit-init.c
+	@mkdir -p $(dir $@)
+	$(CC) -static -O2 -Wall -Wextra -DURBIT_LOOM='"$(URBIT_LOOM)"' -DURBIT_VERBOSE=$(URBIT_VERBOSE) -DURBIT_COMET=0 -o $@ $<
+
+# A comet is a second image, not a flag: it has no pill, and its init is built
+# with URBIT_COMET=1 so the exec line cannot be the fake ship's by accident.  A
+# comet that booted with -F zod would be a fake ship wearing a comet's name,
+# and it would be offline, and it would look like it was working.
+$(URBIT_DIR)/init-comet: urbit/urbit-init.c
+	@mkdir -p $(dir $@)
+	$(CC) -static -O2 -Wall -Wextra -DURBIT_LOOM='"$(URBIT_LOOM)"' -DURBIT_VERBOSE=$(URBIT_VERBOSE) -DURBIT_COMET=1 -o $@ $<
+
+$(URBIT_DIR)/initramfs.cpio.gz: $(URBIT_DIR)/init $(URBIT_DIR)/.fetched urbit/mkinitramfs.py
+	@echo "make urbit-rootfs: a root filesystem with two files in it"
+	@rm -rf $(URBIT_DIR)/root
+	@mkdir -p $(URBIT_DIR)/root
+	@cp $(URBIT_DIR)/init $(URBIT_DIR)/root/init
+	@python3 urbit/mkinitramfs.py $(URBIT_DIR)/root $@ \
+	    $(URBIT_DIR)/$(VERE_FILE) $(URBIT_DIR)/$(PILL_FILE) $(URBIT_MODULE_FILES)
+
+$(URBIT_DIR)/initramfs-comet.cpio.gz: $(URBIT_DIR)/init-comet $(URBIT_DIR)/.fetched urbit/mkinitramfs.py
+	@echo "make comet-rootfs: a root filesystem with no pill in it"
+	@rm -rf $(URBIT_DIR)/root-comet
+	@mkdir -p $(URBIT_DIR)/root-comet
+	@cp $(URBIT_DIR)/init-comet $(URBIT_DIR)/root-comet/init
+	@python3 urbit/mkinitramfs.py $(URBIT_DIR)/root-comet $@ \
+	    $(URBIT_DIR)/$(VERE_FILE) $(URBIT_MODULE_FILES)
+
+urbit-fetch: $(URBIT_FETCH_PREREQS)
+	@if [ -z "$(VERE_URL)" ]; then $(URBIT_NO_LOCK); fi
+
+urbit-rootfs: $(URBIT_PREREQS)
+	@if [ -z "$(VERE_URL)" ]; then $(URBIT_NO_LOCK); fi
+
+comet-rootfs: $(URBIT_COMET_PREREQS)
+	@if [ -z "$(VERE_URL)" ]; then $(URBIT_NO_LOCK); fi
+
+# Booting a fake ship installs the Arvo kernel, which is tens of thousands of
+# events of replay on a machine with no KVM: minutes, not seconds.  The dojo is
+# then on the serial console and on the host's $(URBIT_PORT).
+#
+# A fake ship is the right first thing here.  -F zod needs no Azimuth identity,
+# no key file and no network, and it disables ames, so nothing has to be
+# sponsored and nothing has to be reachable.  It is a complete Urbit that
+# cannot talk to the network, which is exactly the shape of a thing Lamp can be
+# pointed at.
+urbit: $(URBIT_PREREQS)
+	@if [ -z "$(VERE_URL)" ]; then $(URBIT_NO_LOCK); fi
+	@echo "make urbit: a fake ship on the serial console, dojo on http://localhost:$(URBIT_PORT)/"
+	@echo "  first boot installs the Arvo kernel and takes a few minutes; Ctrl-A X quits"
+	@echo "  loom $(URBIT_LOOM) ($$(( (1 << $(URBIT_LOOM)) / 1024 / 1024 / 1024 ))GiB), $(URBIT_MEM)MB of guest RAM"
+	@echo "  the pin is $(VERE_VERSION), checked against urbit/urbit.lock on every fetch"
+	@qemu-system-x86_64 -machine pc -m $(URBIT_MEM) -smp $(URBIT_SMP) \
+	    -nographic -no-reboot \
+	    -kernel $(URBIT_DIR)/$(KERNEL_FILE) \
+	    -initrd $(URBIT_DIR)/initramfs.cpio.gz \
+	    -append "console=ttyS0 quiet panic=1" \
+	    -netdev user,id=n0,hostfwd=tcp::$(URBIT_PORT)-:8080 \
+	    -device virtio-net-pci,netdev=n0
+
+# A comet is the other half of item 33, and it is a different animal in every
+# way that matters:
+#
+#   -F zod, offline, the pinned pill, the same Arvo every single time, no
+#   identity, no sponsorship, minutes.  That is `make urbit`, and it is the
+#   shape of a thing Lamp can be pointed at.
+#
+#   -c, online, no pill: a real anonymous ship that has to find a star, ask to
+#   be sponsored and sync from it, which on a machine with no KVM is hours and
+#   not minutes.  It is a citizen of the public Urbit network, and there is no
+#   version of "hermetic" that applies to it.
+#
+# So the two are separate targets and separate images, and neither is a flag on
+# the other.  What a comet is actually for, here, is the thing item 33 says
+# the fake ship cannot do: a real Arvo that is current, reached by sync, rather
+# than by replaying a pill that was pinned weeks ago.
+comet: $(URBIT_COMET_PREREQS)
+	@if [ -z "$(VERE_URL)" ]; then $(URBIT_NO_LOCK); fi
+	@echo "make comet: a real ship, mining against a star, on the serial console"
+	@echo "  dojo on http://localhost:$(URBIT_PORT)/ once it finishes mining"
+	@echo "  loom $(URBIT_LOOM) ($$(( (1 << $(URBIT_LOOM)) / 1024 / 1024 / 1024 ))GiB), $(URBIT_MEM)MB of guest RAM"
+	@echo "  this joins the public network.  with no KVM a full sync is hours."
+	@echo "  the pin is $(VERE_VERSION), checked against urbit/urbit.lock on every fetch"
+	@echo "  there is no pill here: a comet fetches its own from the star"
+	@qemu-system-x86_64 -machine pc -m $(URBIT_MEM) -smp $(URBIT_SMP) \
+	    -nographic -no-reboot \
+	    -kernel $(URBIT_DIR)/$(KERNEL_FILE) \
+	    -initrd $(URBIT_DIR)/initramfs-comet.cpio.gz \
+	    -append "console=ttyS0 quiet panic=1" \
+	    -netdev user,id=n0,hostfwd=tcp::$(URBIT_PORT)-:8080 \
+	    -device virtio-net-pci,netdev=n0
+
+# Repinning is the "updating" half, and it is deliberately not automatic.  A
+# checksum that changed under you is a new binary with new behaviour, and this
+# project's rule is that a new number is written down with the reason before it
+# is believed -- so this prints the diff and changes the lock, and a person runs
+# `make urbit` afterwards to find out whether the new pin still boots.
+urbit-update:
+	@set -e; \
+	new=$$(curl -sSfL -o /dev/null -w '%{url_effective}' \
+	    https://github.com/urbit/vere/releases/latest); \
+	tag=$${new##*/}; \
+	if [ "$$tag" = "$(VERE_VERSION)" ]; then \
+	    echo "make urbit-update: $$tag is already the pin"; \
+	else \
+	    echo "make urbit-update: latest vere is $$tag, the lock says $(VERE_VERSION)"; \
+	    curl -sSfL --retry 3 -o /tmp/urbit-vere.tgz \
+	        "https://github.com/urbit/vere/releases/download/$$tag/linux-x86_64.tgz"; \
+	    rm -rf /tmp/urbit-vere && mkdir -p /tmp/urbit-vere; \
+	    tar xzf /tmp/urbit-vere.tgz -C /tmp/urbit-vere; \
+	    bin=$$(ls /tmp/urbit-vere | head -1); \
+	    sha=$$(sha256sum /tmp/urbit-vere/$$bin | cut -d' ' -f1); \
+	    size=$$(stat -c%s /tmp/urbit-vere/$$bin); \
+	    tsha=$$(sha256sum /tmp/urbit-vere.tgz | cut -d' ' -f1); \
+	    tsize=$$(stat -c%s /tmp/urbit-vere.tgz); \
+	    echo "  $$bin"; \
+	    echo "    sha256 $$sha"; echo "    $$size bytes"; \
+	    echo "  linux-x86_64.tgz"; \
+	    echo "    sha256 $$tsha"; echo "    $$tsize bytes"; \
+	    echo; \
+	    echo "  Both, because the release is a tarball and the binary is what"; \
+	    echo "  runs.  The tarball is checked on the way in and the binary after"; \
+	    echo "  it is unpacked."; \
+	    echo; \
+	    echo "  This is a new binary.  Lamp does not check Arvo's behaviour, so"; \
+	    echo "  nothing here proves it is good.  Boot it before believing it:"; \
+	    echo; \
+	    echo "    make urbit-check-new URBIT_VERE=$$tag"; \
+	    echo; \
+	    echo "  If it boots, re-pin with those four numbers:"; \
+	    echo; \
+	    echo "    make urbit-repin VERE_VERSION=$$tag VERE_FILE=$$bin \\"; \
+	    echo "      VERE_SHA256=$$sha VERE_BYTES=$$size \\"; \
+	    echo "      VERE_TGZ_SHA256=$$tsha VERE_TGZ_BYTES=$$tsize"; \
+	    echo; \
+	    echo "  'make urbit-repin' rewrites the lock and nothing else.  The"; \
+	    echo "  kernel and the pill keep their own pins: a new runtime is not a"; \
+	    echo "  reason to re-download a 217 MB kernel."; \
+	fi
+
+# Boot a release the lock does not name, without changing the lock.  This has
+# to exist, because `urbit-update` tells a person to run it: a message pointing
+# at a target that is not there is a sentence in a list rather than a step, and
+# this is the one place in the tree where a person is asked to run something
+# unchecked on purpose.
+#
+#   make urbit-check-new URBIT_VERE=vere-v4.7
+#
+# The binary is deliberately not checked against the lock.  It is a release the
+# lock does not name yet, and writing a pin down before a person has watched it
+# boot is the thing this section exists to avoid.  What it prints instead is the
+# sha256 and the size, which are exactly the two numbers `urbit-repin` wants and
+# are printed *before* the boot, so a person who gives up waiting for the replay
+# already has them.  The pill and the kernel stay pinned: only the runtime is
+# new, so the question being asked is a question about one binary.
+URBIT_NEW_DIR := $(BUILD)/urbit-new
+URBIT_VERE    ?=
+
+urbit-check-new: $(URBIT_FETCH_PREREQS)
+	@if [ -z "$(VERE_URL)" ]; then $(URBIT_NO_LOCK); fi
+	@if [ -z "$(URBIT_VERE)" ]; then \
+	  echo "make urbit-check-new: say which release to try."; \
+	  echo "  'make urbit-update' prints the line for the latest one."; \
+	  echo; \
+	  echo "    make urbit-check-new URBIT_VERE=vere-v4.7"; \
+	  echo; exit 1; \
+	fi
+	@set -e; \
+	rm -rf $(URBIT_NEW_DIR); mkdir -p $(URBIT_NEW_DIR); \
+	echo "make urbit-check-new: $(URBIT_VERE), which the lock does not name"; \
+	curl -sSfL --retry 3 -o $(URBIT_NEW_DIR)/vere.tgz \
+	    "https://github.com/urbit/vere/releases/download/$(URBIT_VERE)/linux-x86_64.tgz"; \
+	tar xzf $(URBIT_NEW_DIR)/vere.tgz -C $(URBIT_NEW_DIR); \
+	bin=$$(ls $(URBIT_NEW_DIR) | grep -v '\.tgz$$' | head -1); \
+	sha=$$(sha256sum $(URBIT_NEW_DIR)/$$bin | cut -d' ' -f1); \
+	size=$$(stat -c%s $(URBIT_NEW_DIR)/$$bin); \
+	tsha=$$(sha256sum $(URBIT_NEW_DIR)/vere.tgz | cut -d' ' -f1); \
+	tsize=$$(stat -c%s $(URBIT_NEW_DIR)/vere.tgz); \
+	echo; \
+	echo "  $$bin"; \
+	echo "    sha256 $$sha"; echo "    $$size bytes"; \
+	echo "  linux-x86_64.tgz"; \
+	echo "    sha256 $$tsha"; echo "    $$tsize bytes"; \
+	echo; \
+	echo "  These are the numbers a re-pin needs, and they are the only claim"; \
+	echo "  made about this binary.  Nothing has checked that it works."; \
+	echo; \
+	rm -rf $(URBIT_NEW_DIR)/root; mkdir -p $(URBIT_NEW_DIR)/root; \
+	cp $(URBIT_DIR)/init $(URBIT_NEW_DIR)/root/init; \
+	python3 urbit/mkinitramfs.py $(URBIT_NEW_DIR)/root \
+	    $(URBIT_NEW_DIR)/initramfs.cpio.gz \
+	    $(URBIT_NEW_DIR)/$$bin $(URBIT_DIR)/$(PILL_FILE) >/dev/null; \
+	echo "  booting it against the pinned $(PILL_FILE) and the pinned kernel."; \
+	echo "  First boot installs the Arvo kernel and takes a few minutes; Ctrl-A X quits."; \
+	qemu-system-x86_64 -machine pc -m $(URBIT_MEM) -smp $(URBIT_SMP) \
+	    -nographic -no-reboot \
+	    -kernel $(URBIT_DIR)/$(KERNEL_FILE) \
+	    -initrd $(URBIT_NEW_DIR)/initramfs.cpio.gz \
+	    -append "console=ttyS0 quiet panic=1" \
+	    -netdev user,id=n0,hostfwd=tcp::$(URBIT_PORT)-:8080 \
+	    -device virtio-net-pci,netdev=n0
+
+# Rewrite the lock, and only the lock.  This is the one target in the tree that
+# edits a checked-in file, so it takes all six numbers or none of them, and it
+# prints the diff it made rather than leaving that to be found out later -- a
+# re-pin that silently did nothing is exactly the failure this project has spent
+# seven steps learning to name (item 31: a build that quietly disagrees with its
+# source is worse than no build at all).
+#
+# Six rather than four because there are two files.  A re-pin that set the
+# binary's hash and left the tarball's alone would fetch, unpack, and then fail
+# on a pin nobody had looked at since the last release -- which is a confusing
+# way to learn that a number is stale.
+#
+# If the binary is still sitting in build/urbit-new from a `urbit-check-new`, the
+# sha256 given here is checked against it before anything is written, so a
+# number copied from the wrong line fails here rather than at the next fetch.
+urbit-repin:
+	@if [ ! -f $(URBIT_LOCK) ]; then $(URBIT_NO_LOCK); fi
+	@set -e; \
+	for v in VERE_VERSION VERE_FILE VERE_SHA256 VERE_BYTES \
+	         VERE_TGZ_SHA256 VERE_TGZ_BYTES; do \
+	  if [ -z "$$(eval echo \$$$$v)" ]; then \
+	    echo "make urbit-repin: $$v was not given."; \
+	    echo "  A re-pin takes all six or none of them -- the release is a"; \
+	    echo "  tarball and the binary inside it are two different files:"; \
+	    echo; \
+	    echo "    make urbit-repin VERE_VERSION=vere-v4.7 VERE_FILE=vere-v4.7-linux-x86_64 \\"; \
+	    echo "      VERE_SHA256=<64 hex> VERE_BYTES=<size> \\"; \
+	    echo "      VERE_TGZ_SHA256=<64 hex> VERE_TGZ_BYTES=<size>"; \
+	    echo; \
+	    echo "  'make urbit-update' prints all six."; \
+	    echo; exit 1; \
+	  fi; \
+	done; \
+	for h in VERE_SHA256 VERE_TGZ_SHA256; do \
+	  if ! printf '%s' "$$(eval echo \$$$$h)" | grep -Eq '^[0-9a-f]{64}$$'; then \
+	    echo "make urbit-repin: $$h is not 64 lowercase hex characters."; \
+	    exit 1; \
+	  fi; \
+	done; \
+	if [ -f $(URBIT_NEW_DIR)/$(VERE_FILE) ]; then \
+	  got=$$(sha256sum $(URBIT_NEW_DIR)/$(VERE_FILE) | cut -d' ' -f1); \
+	  if [ "$$got" != "$(VERE_SHA256)" ]; then \
+	    echo "make urbit-repin: FAILED -- $(URBIT_NEW_DIR)/$(VERE_FILE) is $$got"; \
+	    echo "  and the pin says $(VERE_SHA256).  Nothing was written."; \
+	    exit 1; \
+	  fi; \
+	  echo "  the file in build/urbit-new hashes to the pin.  Good."; \
+	else \
+	  echo "  build/urbit-new/$(VERE_FILE) is not here, so the pin was not checked"; \
+	  echo "  against anything.  'make urbit-check-new URBIT_VERE=$(VERE_VERSION)'"; \
+	  echo "  prints it, and the fetch will check it on the way in."; \
+	fi; \
+	if [ -f $(URBIT_NEW_DIR)/vere.tgz ]; then \
+	  got=$$(sha256sum $(URBIT_NEW_DIR)/vere.tgz | cut -d' ' -f1); \
+	  if [ "$$got" != "$(VERE_TGZ_SHA256)" ]; then \
+	    echo "make urbit-repin: FAILED -- the tarball is $$got and the pin says"; \
+	    echo "  $(VERE_TGZ_SHA256).  Nothing was written."; \
+	    exit 1; \
+	  fi; \
+	  echo "  the tarball in build/urbit-new hashes to its pin.  Good."; \
+	fi; \
+	cp $(URBIT_LOCK) $(URBIT_LOCK).bak; \
+	sed -i \
+	  -e 's|^VERE_VERSION :=.*|VERE_VERSION := $(VERE_VERSION)|' \
+	  -e 's|^VERE_URL     :=.*|VERE_URL     := https://github.com/urbit/vere/releases/download/$(VERE_VERSION)/linux-x86_64.tgz|' \
+	  -e 's|^VERE_TGZ_SHA256 :=.*|VERE_TGZ_SHA256 := $(VERE_TGZ_SHA256)|' \
+	  -e 's|^VERE_TGZ_BYTES  :=.*|VERE_TGZ_BYTES  := $(VERE_TGZ_BYTES)|' \
+	  -e 's|^VERE_FILE    :=.*|VERE_FILE    := $(VERE_FILE)|' \
+	  -e 's|^VERE_SHA256  :=.*|VERE_SHA256  := $(VERE_SHA256)|' \
+	  -e 's|^VERE_BYTES   :=.*|VERE_BYTES   := $(VERE_BYTES)|' \
+	  $(URBIT_LOCK); \
+	echo; \
+	diff -u $(URBIT_LOCK).bak $(URBIT_LOCK) || true; \
+	rm -f $(URBIT_LOCK).bak; \
+	echo; \
+	echo "  Only the runtime moved.  The pill and the kernel keep their pins."; \
+	echo "  'make urbit-fetch' now fetches the new binary, checked against this."
+
+# What the lock says, as sha256sum output, so it can be diffed against a
+# fetched file by hand without trusting any of the code above.
+urbit-checksums: $(URBIT_FETCH_PREREQS)
+	@if [ -z "$(VERE_URL)" ]; then $(URBIT_NO_LOCK); fi
+	@cd $(URBIT_DIR) && sha256sum $(VERE_FILE) $(PILL_FILE) $(KERNEL_FILE)
+	@echo
+	@echo "  That is the binary, the pill and the kernel.  The tarball is not in"
+	@echo "  there: it is unpacked and deleted once the binary has been checked"
+	@echo "  against the pin that matters, which is the binary's."
+
+urbit-clean:
+	rm -rf $(URBIT_DIR) $(URBIT_NEW_DIR)
