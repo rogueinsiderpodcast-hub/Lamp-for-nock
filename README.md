@@ -1,3 +1,5 @@
+!!10,000% Vibe-Coded!!
+
 # Lamp
 
 A freestanding Nock machine. It boots, it evaluates Nock, it tests itself, it
